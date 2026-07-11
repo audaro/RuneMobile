@@ -1,5 +1,7 @@
 # RuneLite on Mobile — iOS & Android (unofficial)
 
+[![CI](https://github.com/audaro/runemobile/actions/workflows/CI.yml/badge.svg)](https://github.com/audaro/runemobile/actions/workflows/CI.yml)
+[![Discord](https://img.shields.io/badge/discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/YOUR_INVITE_CODE)
 [![License: BSD-2-Clause](https://img.shields.io/badge/license-BSD--2--Clause-blue)](LICENSE)
 ![Platform: iOS | Android](https://img.shields.io/badge/platform-iOS%20%7C%20Android-lightgrey)
 ![Distribution: sideload-only](https://img.shields.io/badge/distribution-sideload--only-red)

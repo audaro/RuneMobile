@@ -1,13 +1,15 @@
 name: CI
 
-# Upstream RuneLite's full build/test (JDK 11). We keep it available for manual runs but do NOT let it fire on
-# every push/PR: this fork enables Actions only to drive the self-hosted runemobile-release workflow, and this
-# heavy hosted-runner job would otherwise consume minutes on every merge. (Re-widen the trigger if you ever
-# want upstream CI back.) Kept as workflow_dispatch so a future upstream merge conflicts loudly here, on purpose.
-on: [ workflow_dispatch ]
+# Upstream RuneLite's full build/test (JDK 11), run as the open pull-request check — the same trigger RuneLite
+# itself uses. Every PR (including from forks) and every push to the public mirror gets a public green/red build.
+on: [ push, pull_request ]
 
 jobs:
   build:
+    # Runs on all pull requests, and on pushes only for the public mirror (repo id 1296635776). Pushes to the
+    # private origin are skipped: the self-hosted release workflow already builds and gates every merge there,
+    # so there is no need to double-build on hosted minutes.
+    if: github.event_name == 'pull_request' || github.repository_id == '1296635776'
     runs-on: ubuntu-24.04
 
     permissions:
