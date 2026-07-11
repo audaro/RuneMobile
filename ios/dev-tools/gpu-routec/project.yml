@@ -1,0 +1,24 @@
+name: GpuRouteC
+options:
+  bundleIdPrefix: dev.audaro
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+targets:
+  GpuRouteC:
+    type: application
+    platform: iOS
+    sources:
+      - path: app
+    dependencies:
+      - sdk: OpenGLES.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.audaro.gpuroutec
+        GENERATE_INFOPLIST_FILE: "YES"
+        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: "YES"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGN_IDENTITY: ""
+        CLANG_ENABLE_OBJC_ARC: "YES"

@@ -1,0 +1,58 @@
+# RuneMobile rolling release — build a signed APK + IPA on every merge to master and publish them as a
+# single always-latest "latest-master" prerelease on the PUBLIC repo (audaro/runemobile).
+#
+# Runs on a SELF-HOSTED runner on the developer Mac (which already has the full toolchain + the real signing
+# keychain), so artifacts are real-signed at $0 with no key material uploaded to GitHub. The runner must be
+# attached to the PRIVATE origin repo ONLY — never a public repo, where an untrusted PR could run code on the
+# Mac. The one secret this needs is PUBLISH_TOKEN (a PAT with contents:write on audaro/runemobile).
+#
+# The actual build/publish logic lives in tools/ci/*.sh (runnable + testable without GitHub); this workflow is
+# a thin wrapper, matching the android-release-gate.sh convention.
+name: runemobile-release
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# A burst of merges only needs the newest build published; cancel any superseded in-flight run.
+concurrency:
+  group: runemobile-release
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    # Runs ONLY in the private origin repo (where the trusted runner is registered), matched by the repo's
+    # immutable database id rather than its name (rename/transfer-proof; Actions string compares are also
+    # case-insensitive, so a name match is the weaker form). In the public mirror or any fork this job is
+    # inert, so no workflow event can ever lure code onto the runner Mac.
+    if: github.repository_id == '1253608468'
+    runs-on: [self-hosted, macOS]
+    permissions:
+      contents: read
+    env:
+      JAVA_HOME: /opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
+      BUILD_NUMBER: ${{ github.run_number }}
+      GIT_SHA: ${{ github.sha }}
+      # Never publish a debug/mismatched-signed APK — the build hard-fails unless the cert is the 45:E3 release key.
+      REQUIRE_RELEASE_KEY: "1"
+    steps:
+      # Pinned to a full commit SHA (not the mutable @v4 tag): this runs on a Mac holding signing material, so a
+      # retagged third-party action must not be able to run new code here. 11bd719 = actions/checkout v4.2.2.
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Contract pre-flight (fast, non-bypassable)
+        run: ./android/dev-tools/ci/release-gate.sh --contract-only
+
+      - name: Build signed APK + IPA
+        run: |
+          export GIT_SHA="$(git rev-parse --short "${GIT_SHA}")"
+          tools/ci/build-release-artifacts.sh
+
+      - name: Publish rolling prerelease to the public repo
+        env:
+          PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
+        run: |
+          export GIT_SHA="$(git rev-parse --short HEAD)"
+          tools/ci/publish-rolling-release.sh

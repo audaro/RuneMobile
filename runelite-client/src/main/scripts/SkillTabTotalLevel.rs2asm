@@ -1,0 +1,138 @@
+.id                       396
+.int_arg_count            2
+.long_arg_count           0
+.obj_arg_count            0
+   invoke                 1007
+   istore                 2
+   iconst                 396
+   iload                  0
+   iload                  1
+   iconst                 3278
+   iconst                 4940
+   iconst                 2
+   sconst                 "iiY"
+   iload                  0
+   if_setonvartransmit   
+   sconst                 "Total level: "
+   iload                  2
+   tostring              
+   join_string            2
+   iload                  0
+   sconst                 "skillTabTotalLevel" ; push event name
+   runelite_callback     ; invoke callback
+   if_settext            
+   iload                  0
+   if_clearops           
+   sconst                 ""
+   ostore                 0
+   sconst                 ""
+   ostore                 1
+   map_members           
+   iconst                 1
+   if_icmpeq              LABEL30
+   get_varc_int           103
+   iconst                 1
+   if_icmpeq              LABEL30
+   jump                   LABEL36
+LABEL30:
+   sconst                 "Total XP:"
+   ostore                 0
+   invoke                 1008
+   invoke                 1009
+   ostore                 1
+   jump                   LABEL45
+LABEL36:
+   sconst                 "Total XP:|Free Total Level:"
+   ostore                 0
+   invoke                 1008
+   invoke                 1009
+   sconst                 "|"
+   invoke                 1320
+   tostring              
+   join_string            3
+   ostore                 1
+LABEL45:
+   iconst                 1736
+   invoke                 3697
+   iconst                 1
+   if_icmpeq              LABEL50
+   jump                   LABEL65
+LABEL50:
+   oload                  0
+   sconst                 "|"
+   invoke                 7699
+   join_string            2
+   append                
+   ostore                 0
+   oload                  1
+   sconst                 "|"
+   iconst                 -1
+   invoke                 7698
+   sconst                 ","
+   invoke                 46
+   join_string            2
+   append                
+   ostore                 1
+LABEL65:
+   invoke                 1972
+   iconst                 1
+   if_icmpeq              LABEL69
+   jump                   LABEL100
+LABEL69:
+   iconst                 1
+   sconst                 "Toggle Total XP"
+   iload                  0
+   if_setop              
+   iconst                 2367
+   iconst                 -2147483644
+   iconst                 -2147483645
+   iconst                 -1
+   iload                  1
+   oload                  0
+   oload                  1
+   iconst                 495
+   sconst                 "iiiissi"
+   iload                  0
+   if_setonop            
+   get_varc_int           218
+   iload                  0
+   if_icmpeq              LABEL88
+   jump                   LABEL99
+LABEL88:
+   get_varc_int           217
+   iconst                 -1
+   if_icmpeq              LABEL92
+   jump                   LABEL99
+LABEL92:
+   iload                  0
+   iconst                 -1
+   iload                  1
+   oload                  0
+   oload                  1
+   iconst                 495
+   invoke                 2344
+LABEL99:
+   jump                   LABEL120
+LABEL100:
+   iconst                 992
+   iconst                 -2147483645
+   iconst                 -1
+   iload                  1
+   oload                  0
+   oload                  1
+   iconst                 495
+   iconst                 25
+   iconst                 5
+   div                   
+   sconst                 "iiissii"
+   iload                  0
+   if_setonmouserepeat   
+   iconst                 40
+   iload                  1
+   sconst                 "i"
+   iload                  0
+   if_setonmouseleave    
+   iconst                 0
+   set_varc_int           2
+LABEL120:
+   return                

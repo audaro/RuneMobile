@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Keep commit messages free of stray Co-Authored-By trailers (single-author history).
+# Override (discouraged): git commit --no-verify
+set -uo pipefail
+
+hits="$(grep -v '^#' "$1" | grep -inE 'co-authored-by' || true)"
+if [ -n "$hits" ]; then
+	echo "commit-msg: blocked — stray Co-Authored-By trailer in the commit message:" >&2
+	printf '%s\n' "$hits" | sed 's/^/   /' >&2
+	echo "Remove it." >&2
+	exit 1
+fi
+exit 0

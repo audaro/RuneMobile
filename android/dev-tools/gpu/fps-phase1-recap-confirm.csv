@@ -1,0 +1,17 @@
+label,kind,idx,a,b,c,d,e,gs
+phase1-recap-confirm,fps,0,50,,,,,LOGGED_IN
+phase1-recap-confirm,fps,1,50,,,,,LOGGED_IN
+phase1-recap-confirm,fps,2,50,,,,,LOGGED_IN
+phase1-recap-confirm,fps,3,50,,,,,LOGGED_IN
+phase1-recap-confirm,fps,4,50,,,,,LOGGED_IN
+phase1-recap-confirm,fps,5,49,,,,,LOGGED_IN
+phase1-recap-confirm,fps,6,50,,,,,LOGGED_IN
+phase1-recap-confirm,fps,7,50,,,,,LOGGED_IN
+phase1-recap-confirm,frame,0,50,18.55,20.00,21.07,21.81,LOGGED_IN
+phase1-recap-confirm,frame,1,51,17.95,19.98,21.43,21.92,LOGGED_IN
+phase1-recap-confirm,frame,2,50,16.59,20.00,20.87,23.03,LOGGED_IN
+phase1-recap-confirm,frame,3,50,18.14,20.00,20.85,22.49,LOGGED_IN
+phase1-recap-confirm,frame,4,50,18.43,19.99,21.04,22.28,LOGGED_IN
+phase1-recap-confirm,frame,5,49,11.77,20.41,21.45,56.71,LOGGED_IN
+phase1-recap-confirm,frame,6,50,18.32,20.00,20.79,21.00,LOGGED_IN
+phase1-recap-confirm,frame,7,50,16.99,19.99,21.55,22.85,LOGGED_IN

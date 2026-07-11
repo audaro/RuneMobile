@@ -1,0 +1,321 @@
+/*
+ * Copyright (c) 2017, Adam <Adam@sigterm.info>
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice, this
+ *    list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+package net.runelite.cache.script.assembler;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import lombok.RequiredArgsConstructor;
+import net.runelite.cache.definitions.ScriptDefinition;
+import net.runelite.cache.script.Instructions;
+import net.runelite.cache.script.Opcodes;
+
+@RequiredArgsConstructor
+class ScriptWriter extends rs2asmBaseListener
+{
+	private final Instructions instructions;
+	private final LabelVisitor labelVisitor;
+	private final Map<String, Object> symbols;
+
+	private int id;
+	private int pos;
+	private int intArgCount;
+	private int longArgCount;
+	private int objArgCount;
+	private int localIntCount;
+	private int localLongCount;
+	private int localObjCount;
+	private final List<Integer> opcodes = new ArrayList<>();
+	private final List<Integer> iops = new ArrayList<>();
+	private final List<Long> lops = new ArrayList<>();
+	private final List<String> sops = new ArrayList<>();
+	private final List<LookupSwitch> switches = new ArrayList<>();
+
+	@Override
+	public void enterId_value(rs2asmParser.Id_valueContext ctx)
+	{
+		id = Integer.parseInt(ctx.getText());
+	}
+
+	@Override
+	public void enterInt_arg_value(rs2asmParser.Int_arg_valueContext ctx)
+	{
+		intArgCount = Integer.parseInt(ctx.getText());
+	}
+
+	@Override
+	public void enterLong_arg_value(rs2asmParser.Long_arg_valueContext ctx)
+	{
+		longArgCount = Integer.parseInt(ctx.getText());
+	}
+
+	@Override
+	public void enterObj_arg_value(rs2asmParser.Obj_arg_valueContext ctx)
+	{
+		objArgCount = Integer.parseInt(ctx.getText());
+	}
+
+	@Override
+	public void exitInstruction(rs2asmParser.InstructionContext ctx)
+	{
+		++pos;
+	}
+
+	@Override
+	public void enterName_string(rs2asmParser.Name_stringContext ctx)
+	{
+		String text = ctx.getText();
+		Integer opcode = instructions.findOpcodeFromName(text);
+		if (opcode == null)
+		{
+			throw new RuntimeException("Unknown instruction " + text);
+		}
+
+		addOpcode(opcode);
+	}
+
+	@Override
+	public void enterName_opcode(rs2asmParser.Name_opcodeContext ctx)
+	{
+		String text = ctx.getText();
+		int opcode = Integer.parseInt(text);
+		addOpcode(opcode);
+	}
+
+	private void addOpcode(int opcode)
+	{
+		assert opcodes.size() == pos;
+		assert iops.size() == pos;
+		assert lops.size() == pos;
+		assert sops.size() == pos;
+		assert switches.size() == pos;
+
+		opcodes.add(opcode);
+		iops.add(null);
+		lops.add(null);
+		sops.add(null);
+
+		if (opcode == Opcodes.SWITCH)
+		{
+			switches.add(new LookupSwitch());
+		}
+		else
+		{
+			switches.add(null);
+		}
+	}
+
+	@Override
+	public void enterOperand_int(rs2asmParser.Operand_intContext ctx)
+	{
+		String text = ctx.getText();
+		int opcode = opcodes.get(opcodes.size() - 1);
+		if (opcode == Opcodes.LCONST)
+		{
+			lops.set(pos, Long.parseLong(text));
+		}
+		else
+		{
+			iops.set(pos, Integer.parseInt(text));
+		}
+	}
+
+	@Override
+	public void enterOperand_qstring(rs2asmParser.Operand_qstringContext ctx)
+	{
+		String text = ctx.getText();
+		text = text.substring(1, text.length() - 1)
+			.replace("\\\\", "\\")
+			.replace("\\\"", "\"");
+		sops.set(pos, text);
+	}
+
+	@Override
+	public void enterOperand_label(rs2asmParser.Operand_labelContext ctx)
+	{
+		String text = ctx.getText();
+		Integer instruction = labelVisitor.getInstructionForLabel(text);
+		if (instruction == null)
+		{
+			throw new RuntimeException("reference to unknown label " + text);
+		}
+
+		int target = instruction - pos - 1; // -1 to go to the instruction prior
+		iops.set(pos, target);
+	}
+
+	@Override
+	public void enterOperand_symbol(rs2asmParser.Operand_symbolContext ctx)
+	{
+		String symbolName = ctx.getText().substring(1);
+		Object symbol = symbols.get(symbolName);
+		if (symbol == null)
+		{
+			throw new RuntimeException("unknown symbol " + symbolName);
+		}
+
+		if (!(symbol instanceof Integer))
+		{
+			throw new RuntimeException("non-integer symbols not supported");
+		}
+
+		iops.set(pos, (int) symbol);
+	}
+
+	@Override
+	public void exitSwitch_key(rs2asmParser.Switch_keyContext ctx)
+	{
+		String text = ctx.getText();
+		int key = Integer.parseInt(text);
+
+		LookupSwitch ls = switches.get(pos - 1);
+		assert ls != null;
+
+		LookupCase scase = new LookupCase();
+		scase.setValue(key);
+
+		ls.getCases().add(scase);
+	}
+
+	@Override
+	public void exitSwitch_value(rs2asmParser.Switch_valueContext ctx)
+	{
+		String text = ctx.getText();
+		Integer instruction = labelVisitor.getInstructionForLabel(text);
+		if (instruction == null)
+		{
+			throw new RuntimeException("reference to unknown label " + text);
+		}
+
+		int target = instruction // target instruction index
+			- (pos - 1) // pos is already at the instruction after the switch, so - 1
+			- 1; // to go to the instruction prior to target
+
+		LookupSwitch ls = switches.get(pos - 1);
+		assert ls != null;
+
+		LookupCase scase = ls.getCases().get(ls.getCases().size() - 1);
+		scase.setOffset(target);
+	}
+
+	public ScriptDefinition buildScript()
+	{
+		setSwitchOperands();
+		computeLocalSizes();
+
+		ScriptDefinition script = new ScriptDefinition();
+		script.setId(id);
+		script.setIntArgCount(intArgCount);
+		script.setLongArgCount(longArgCount);
+		script.setObjArgCount(objArgCount);
+		script.setLocalIntCount(localIntCount);
+		script.setLocalLongCount(localLongCount);
+		script.setLocalObjCount(localObjCount);
+		script.setInstructions(opcodes.stream().mapToInt(Integer::valueOf).toArray());
+		script.setIntOperands(iops.stream()
+			.mapToInt(i -> i == null ? 0 : i)
+			.toArray());
+		script.setLongOperands(lops.stream()
+			.mapToLong(i -> i == null ? 0L : i)
+			.toArray());
+		script.setStringOperands(sops.toArray(new String[0]));
+		script.setSwitches(buildSwitches());
+		return script;
+	}
+
+	private void computeLocalSizes()
+	{
+		int maxIntVars = intArgCount;
+		int maxLongVars = longArgCount;
+		int maxObjVars = objArgCount;
+		for (int i = 0; i < opcodes.size(); ++i)
+		{
+			int opcode = opcodes.get(i);
+			if (opcode == Opcodes.ILOAD || opcode == Opcodes.ISTORE)
+			{
+				int op = iops.get(i);
+				maxIntVars = Math.max(maxIntVars, op + 1);
+			}
+			else if (opcode == Opcodes.LLOAD || opcode == Opcodes.LSTORE)
+			{
+				int op = iops.get(i);
+				maxLongVars = Math.max(maxLongVars, op + 1);
+			}
+			else if (opcode == Opcodes.OLOAD || opcode == Opcodes.OSTORE)
+			{
+				int op = iops.get(i);
+				maxObjVars = Math.max(maxObjVars, op + 1);
+			}
+		}
+
+		localIntCount = maxIntVars;
+		localLongCount = maxLongVars;
+		localObjCount = maxObjVars;
+	}
+
+	private void setSwitchOperands()
+	{
+		int count = 0;
+		for (int i = 0; i < opcodes.size(); ++i)
+		{
+			if (opcodes.get(i) != Opcodes.SWITCH)
+			{
+				continue;
+			}
+
+			iops.set(i, count++);
+		}
+	}
+
+	private Map<Integer, Integer>[] buildSwitches()
+	{
+		int count = (int) switches.stream().filter(Objects::nonNull).count();
+
+		if (count == 0)
+		{
+			return null;
+		}
+
+		int index = 0;
+		Map<Integer, Integer>[] maps = new Map[count];
+		for (LookupSwitch lswitch : switches)
+		{
+			if (lswitch == null)
+			{
+				continue;
+			}
+
+			Map<Integer, Integer> map = maps[index++] = new LinkedHashMap<>();
+
+			for (LookupCase scase : lswitch.getCases())
+			{
+				map.put(scase.getValue(), scase.getOffset());
+			}
+		}
+		return maps;
+	}
+}

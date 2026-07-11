@@ -1,0 +1,62 @@
+# Android release gate (GATE.md row 6 — "a real gate exists and passes").
+#
+# DORMANT-BUT-READY: GitHub Actions are disabled at the repo level for this fork (it ships an unapproved
+# live-OSRS client and is never published to a marketplace), so this workflow does not execute on GitHub.
+# It is intentionally kept as a thin wrapper that calls the one runnable source of truth —
+# android/dev-tools/ci/release-gate.sh — which a developer runs locally to produce the reproducible evidence
+# the gate requires. If/when Actions are ever enabled (e.g. on a public mirror), this activates unchanged.
+#
+# Covers PROD-QA-01 (assembleRelease + lintRelease + contract; device-smoke is opt-in / needs a device pool)
+# and PROD-RELEASE-ENG-07 (the cross-port contract check as a required CI stage, not a bypassable local hook).
+name: android-release-gate
+
+# Manual-only: this gate runs on GitHub-hosted ubuntu runners, which would consume minutes on every push once
+# Actions are enabled. The per-merge build/publish is handled by the self-hosted runemobile-release workflow
+# (which runs this gate's fast --contract-only pre-flight); run this full gate on demand for a hosted-runner
+# assembleRelease + lintRelease check. (Its logic is fully runnable locally via android/dev-tools/ci/release-gate.sh.)
+on:
+  workflow_dispatch:
+
+jobs:
+  # Fast, always-runnable gate: the cross-port contract diff (PROD-RELEASE-ENG-07). Needs only python3 + bash,
+  # so it is the realistic required check even on a minimal runner. Fails on a removed/changed shared entry.
+  contract:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      # Actions pinned to full commit SHAs (not mutable tags) so a retagged action can't run new code here.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Cross-port contract gate
+        run: ./android/dev-tools/ci/release-gate.sh --contract-only
+
+  # Full release gate: assembleRelease (+ the verifyNoReleaseSecret / verifyReleaseBootAssets guards) + lintRelease.
+  # Heavy — it self-stages the embedded JRE, builds the shared :client shadowJar, and compiles native via the NDK.
+  # A keyless runner falls back to the debug signing key, so the build still produces an installable APK.
+  release-build:
+    runs-on: ubuntu-24.04
+    needs: contract
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Set up JDK 21
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Set up Android SDK + NDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+      - name: Install NDK + cmake (native bridge build)
+        run: sdkmanager "ndk;26.1.10909125" "cmake;3.22.1"
+      - name: Release gate (assembleRelease + lintRelease + contract)
+        run: ./android/dev-tools/ci/release-gate.sh
+      # Device-smoke (boot to first frame) is NOT run here: plain CI has no GPU device. Enable a Firebase
+      # Test Lab pool + gcloud auth, then add `--with-device-smoke` to drive android/dev-tools/firebase/fb-gate.sh.
+      - name: Upload release APK
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: app-release
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: ignore

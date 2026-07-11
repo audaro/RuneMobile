@@ -1,0 +1,133 @@
+{
+  "_doc": [
+    "Single source of truth for the Jagex OAuth wire contract, shared across the three",
+    "implementations that mint tokens.json BEFORE the JVM boots (so a JVM-side bridge is",
+    "impossible — see OAUTH-1). Each port re-implements the same HTTP legs in its own runtime;",
+    "this file + check-auth-contract.sh guard against the three silently drifting apart on an",
+    "endpoint, the Cloudflare-sensitive launcher User-Agent, a client id, a scope, the consent",
+    "response_type, the PKCE method, or a Jagex response key.",
+    "",
+    "Editing a pinned value here WITHOUT updating every port listed in its `ports` fails the",
+    "check. When Jagex changes a value, update this file AND each listed port in the same commit.",
+    "`ports` legend: ios = JagexLoginViewController.m, android = JagexLogin.kt,",
+    "script = ios/dev-tools/fetch-shield-tokens.sh."
+  ],
+  "sources": {
+    "ios": "ios/app/RuneMobile/JagexLoginViewController.m",
+    "android": "android/app/src/main/java/dev/audaro/runemobile/JagexLogin.kt",
+    "script": "ios/dev-tools/fetch-shield-tokens.sh"
+  },
+  "pins": [
+    {
+      "id": "auth-endpoint",
+      "value": "https://account.jagex.com/oauth2/auth",
+      "ports": ["ios", "android", "script"],
+      "note": "OAuth2 authorize endpoint (consent + launcher legs)."
+    },
+    {
+      "id": "token-endpoint",
+      "value": "https://account.jagex.com/oauth2/token",
+      "ports": ["script"],
+      "note": "Stage-B launcher code->access/refresh exchange. Ports skip Stage B (gamepack mints its own play token)."
+    },
+    {
+      "id": "consent-client-id",
+      "value": "1fddee4e-b100-4f4e-b2b0-097f9088f9d2",
+      "ports": ["ios", "android", "script"],
+      "note": "Stage-A consent client. Its id_token is the ONLY one the game-session API accepts (launcher id_token -> INVALID_ID_TOKEN)."
+    },
+    {
+      "id": "consent-redirect",
+      "value": "http://localhost",
+      "ports": ["ios", "android", "script"],
+      "note": "Loopback redirect the ports intercept in the web view (never actually loaded)."
+    },
+    {
+      "id": "consent-scope",
+      "value": "openid offline",
+      "ports": ["ios", "android", "script"],
+      "note": "Stage-A consent scope."
+    },
+    {
+      "id": "consent-response-type",
+      "value": "id_token code",
+      "ports": ["ios", "android", "script"],
+      "note": "OIDC hybrid: id_token (used) + code (unused by ports). URL-encoded on the wire; pinned as the raw pre-encode literal each source passes to its encoder / query builder."
+    },
+    {
+      "id": "launcher-client-id",
+      "value": "com_jagex_auth_desktop_launcher",
+      "ports": ["script"],
+      "note": "Stage-B launcher client (code + PKCE)."
+    },
+    {
+      "id": "launcher-redirect",
+      "value": "https://secure.runescape.com/m=weblogin/launcher-redirect",
+      "ports": ["script"],
+      "note": "Stage-B launcher redirect (code in query)."
+    },
+    {
+      "id": "launcher-scope",
+      "value": "openid offline gamesso.token.create user.profile.read",
+      "ports": ["script"],
+      "note": "Stage-B launcher scope."
+    },
+    {
+      "id": "pkce-method",
+      "value": "S256",
+      "ports": ["script"],
+      "note": "Stage-B PKCE code_challenge_method."
+    },
+    {
+      "id": "sessions-url",
+      "value": "https://auth.runescape.com/game-session/v1/sessions",
+      "ports": ["ios", "android", "script"],
+      "note": "POST {idToken} -> {sessionId}."
+    },
+    {
+      "id": "accounts-url",
+      "value": "https://auth.runescape.com/game-session/v2/accounts?fetchMembership=true",
+      "ports": ["ios", "android", "script"],
+      "note": "GET (Bearer sessionId) -> [{accountId, displayName, ...}]."
+    },
+    {
+      "id": "otl-mint-endpoint",
+      "value": "https://auth.runescape.com/game-session/v1/tokens",
+      "ports": ["script"],
+      "note": "POST {accountId} (Bearer sessionId) -> {token}. Script only; ports let the gamepack mint the play token."
+    },
+    {
+      "id": "launcher-user-agent",
+      "fragments": [
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)",
+        "JagexLauncher/2.4.4 Chrome/120.0.0.0 Safari/537.36"
+      ],
+      "ports": ["ios", "android", "script"],
+      "note": "Cloudflare in front of the game-session API is User-Agent sensitive; must match the official Mac launcher. iOS/Android wrap this string across two source lines with concat glue (\" @\" / \" +\"), so it is pinned as two fragments that each sit within one source line; both must be present. The second fragment carries the version numbers most likely to drift."
+    },
+    {
+      "id": "resp-key-session-id",
+      "value": "sessionId",
+      "ports": ["ios", "android", "script"],
+      "note": "Jagex response key: game-session mint result."
+    },
+    {
+      "id": "resp-key-account-id",
+      "value": "accountId",
+      "ports": ["ios", "android", "script"],
+      "note": "Jagex response key: account identity."
+    },
+    {
+      "id": "resp-key-display-name",
+      "value": "displayName",
+      "ports": ["ios", "android", "script"],
+      "note": "Jagex response key: character display name."
+    },
+    {
+      "id": "req-key-id-token",
+      "value": "idToken",
+      "ports": ["ios", "android", "script"],
+      "note": "Request body key POSTed to the sessions endpoint."
+    }
+  ]
+}

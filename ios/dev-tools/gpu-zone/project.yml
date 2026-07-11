@@ -1,0 +1,32 @@
+name: GpuZone
+options:
+  bundleIdPrefix: dev.audaro
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+targets:
+  GpuZone:
+    type: application
+    platform: iOS
+    sources:
+      - path: app
+      - path: assembled
+        buildPhase: resources
+        # RLHD zone shaders, RLHD-Template-assembled (#include/#define resolved), bundled flat as
+        # `<name>.<stage>.assembled.glsl`, downported to ES 3.00 at runtime by ZoneProbe/ZoneDownport.
+        # Populated by the assemble step (see README "Status"); empty placeholder until then.
+    dependencies:
+      - sdk: OpenGLES.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.audaro.gpuzone
+        GENERATE_INFOPLIST_FILE: "YES"
+        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: "YES"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        # Device signing (same team as RuneMobile). This probe has NO JVM/JIT — it's a pure EAGL shader-compile
+        # gate — so it runs on device WITHOUT StikDebug; just install + launch via devicectl. The Simulator build
+        # ignores signing.
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
+        CLANG_ENABLE_OBJC_ARC: "YES"

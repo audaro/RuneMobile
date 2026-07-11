@@ -1,0 +1,47 @@
+# Secrets — never commit (covers tokens.json + .bak/.tutorial/.* backups)
+tokens.json*
+
+# Device-capture evidence (capture logs / frames may hold PII or live session data — never commit)
+app/evidence/
+
+# JVM benchmark build output
+dev-tools/jvmbench/out/
+
+# Headless probe output dirs (regen by re-running the headless harness)
+dev-tools/headless/out-*/
+
+# Built fake-xawt AWT shim (regen per-machine)
+dev-tools/fake-xawt/*.dylib
+
+# Bundled JRE artifacts (large; fetched per-machine)
+jre*-ios-aarch64*
+dev-tools/jre/
+**/Frameworks/*.dylib
+
+# Java build artifacts
+*.class
+
+# Xcode / iOS build
+app/**/build/
+app/**/DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# xcodegen output (regenerate with `xcodegen generate`; project.yml is source of truth)
+app/*.xcodeproj/
+
+# Java payload build dir (Hello.jar itself IS committed — small, deterministic)
+app/jvm-resources/classes/
+# Staged shaded client jar. The `*` matches both the version-agnostic staged name (client-shaded.jar,
+# what the bundle references today) and any legacy versioned copy (client-<ver>-shaded.jar).
+app/jvm-resources/client-*shaded.jar
+# GPU Zone B0 staged RLHD jar (regen: dev-tools/gpu-zone/stage-ios-zone-jar.sh); same version-agnostic + legacy match.
+app/jvm-resources/client-*rlhd.jar
+# GPU Route C L1 kill-test jar (regen: dev-tools/gpu-routec/l1/build-l1-probe.sh)
+app/jvm-resources/routec-l1.jar
+# Probes/boot jar (regen: app/build-probes.sh — build the shaded client jar first; the Android
+# buildProbes Gradle task also regenerates it). Generated output, like the sibling jars above.
+app/jvm-resources/probes.jar
+
+# Per-machine remote-deploy config (host/paths/device UUID)
+dev-tools/deploy-remote.conf

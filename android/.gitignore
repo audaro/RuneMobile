@@ -1,0 +1,29 @@
+# Build outputs
+.gradle/
+.kotlin/
+build/
+app/build/
+app/build-jvm/
+app/.cxx/
+local.properties
+
+# Large / gitignored runtime assets (mirror ios/dev-tools) — staged into the APK, never committed:
+#   the embedded Android arm64 JRE (.so libs go in jniLibs, the rest in assets/jvm/jre)
+app/src/main/jniLibs/
+app/src/main/assets/jvm/jre/
+#   the shaded RuneLite client jar + probes + CACIO jars + the staged content tag
+app/src/main/assets/jvm/client-*.jar
+app/src/main/assets/jvm/probes.jar
+app/src/main/assets/jvm/cacio/
+app/src/main/assets/jvm/runtime.tag
+#   the optional bundled Jagex session (personal sideload bundles only — a SECRET, never committed).
+#   PROD-SECURITY-01: lives under src/debug/assets so it ships ONLY in debug builds, never in release.
+app/src/main/assets/tokens.json
+app/src/debug/assets/tokens.json
+
+# IDE
+.idea/
+*.iml
+
+# JRE download cache (tools/stage-android-jre.sh)
+dev-tools/.jre-cache/

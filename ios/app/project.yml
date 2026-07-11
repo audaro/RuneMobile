@@ -1,0 +1,146 @@
+name: RuneMobile
+options:
+  bundleIdPrefix: dev.audaro
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+# Two build configurations mapped to xcodegen's standard presets. Debug = the dev daily-driver (today's
+# behaviour: file-sharing on, on-device log/capture sinks, -O0). Release = the hardened build (QA-P1-12/13):
+# Documents file-sharing OFF, the PII/diagnostic file sinks + rl-capture + on-screen console gated off via
+# `#if DEBUG`, .runelite relocated to the sandboxed App Support dir. The deploy scripts default to Debug and
+# take CONFIG=Release to opt in (StikDebug attach under Release is device-unverified — get-task-allow comes
+# from the dev profile, so it should hold).
+configs:
+  Debug: debug
+  Release: release
+
+settings:
+  base:
+    TARGETED_DEVICE_FAMILY: "1"          # iPhone
+    ENABLE_BITCODE: NO
+    SWIFT_VERSION: "5.0"
+    CLANG_ENABLE_OBJC_ARC: YES
+    # OpenGLES is deprecated-since-iOS-12 (Apple pushes Metal) but works on iOS 26. Silence the deprecation
+    # warnings target-wide so real warnings stay visible (used by the EAGL fallback backend + the GLRecon recon).
+    # RC_BACKEND_ANGLE=1 selects the Phase A1 MetalANGLE/EGL backend in Route C (clip_control depth fix + MSAA);
+    # the EAGL fallback is the #else path. Apple's OpenGLES.framework and ANGLE's libGLESv2 BOTH export glXxx and
+    # cannot be linked together, so the active backend = this macro + the linked frameworks below MUST agree:
+    #   ANGLE (default): RC_BACKEND_ANGLE=1   + link libEGL/libGLESv2 (NOT OpenGLES.framework)
+    #   EAGL  (A/B base): drop RC_BACKEND_ANGLE + link OpenGLES.framework (NOT the ANGLE frameworks)
+    GCC_PREPROCESSOR_DEFINITIONS:
+      - "$(inherited)"
+      - "GLES_SILENCE_DEPRECATION=1"
+      # BACKEND TOGGLE — EAGL is ACTIVE (the device-kit gl_FragDepth A/B path; also needs no vendored ANGLE
+      # frameworks, so it builds on a fresh Mac). For the MetalANGLE backend: uncomment RC_BACKEND_ANGLE=1 here
+      # AND the libEGL/libGLESv2 frameworks below, AND re-comment OpenGLES.framework (macro + frameworks MUST agree).
+      # - "RC_BACKEND_ANGLE=1"
+    # Let the resign-jre build phase write into the .app.
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+
+targets:
+  RuneMobile:
+    type: application
+    platform: iOS
+    sources:
+      - path: RuneMobile
+      # The verified Amethyst jre21 (gitignored, ~24MB) — copied verbatim into
+      # the .app as `jre/` (folder reference; Xcode must NOT treat it as linked
+      # frameworks). Re-signed by scripts/resign-jre.sh after this copy.
+      - path: ../dev-tools/jre
+        type: folder
+        buildPhase: resources
+      - path: jvm-resources/probes.jar
+        buildPhase: resources
+      # §6.2: the shaded RuneLite client (all deps) — gitignored build artifact, ~29 MB. Version-agnostic
+      # name (stage-ios-gpu-jar.sh renames on stage) so an upstream version bump can't break this reference.
+      - path: jvm-resources/client-shaded.jar
+        buildPhase: resources
+      # W3 GPU Route C: the native JNI GL bridge (EAGL ES3 AWTContext analogue + 97 forwarders) compiled into
+      # the shell. RouteCProbe.m / main.m in the same dir are the Simulator harness — NOT added here.
+      - path: ../dev-tools/gpu-routec/app/RouteCBridge.m
+      - path: ../dev-tools/gpu-routec/jni/routec_gl_jni.m
+      # W3 GPU Zone B0.5: the RLHD (117HD) facade-delta JNI forwarders, registered on top of the base bridge by
+      # RouteC_registerZoneNatives. Compiled into the shell; inert unless routecZoneMode registers it.
+      - path: ../dev-tools/gpu-zone/jni/routec_zone_jni.m
+      # W3 GPU Route C — L1 kill-test jar (facade-native + RouteCL1Probe only; gitignored build artifact).
+      - path: jvm-resources/routec-l1.jar
+        buildPhase: resources
+      # W3 GPU Zone B0.5: the staged 117HD (RLHD) jar — rs117/** + RLHD shader/JSON resources, no lwjgl (facade
+      # ships in the shaded jar). gitignored build artifact (regen: dev-tools/gpu-zone/stage-ios-zone-jar.sh).
+      - path: jvm-resources/client-rlhd.jar
+        buildPhase: resources
+    dependencies:
+      # WKWebView for the on-device Jagex login (JagexLoginSpikeViewController).
+      - sdk: WebKit.framework
+      - sdk: Metal.framework
+      # Picture-in-Picture + background keepalive: AVKit (AVPictureInPictureController),
+      # AVFoundation (AVSampleBufferDisplayLayer + AVAudioSession/Engine), CoreMedia/CoreVideo
+      # (CMSampleBuffer/CVPixelBuffer frame plumbing).
+      - sdk: AVKit.framework
+      - sdk: AVFoundation.framework
+      - sdk: CoreMedia.framework
+      - sdk: CoreVideo.framework
+      # MetalANGLE GPU backend (INACTIVE — pair with RC_BACKEND_ANGLE=1 above to enable). Vendored libEGL/libGLESv2,
+      # gitignored (regenerate via dev-tools/gpu-angle/README); embedded + codesigned so the app dlopens them on
+      # device. Provides EXT_clip_control (depth fix) + GL_MAX_SAMPLES=8.
+      # - framework: ../dev-tools/gpu-angle/angle/libEGL.framework
+      #   embed: true
+      #   codeSign: true
+      # - framework: ../dev-tools/gpu-angle/angle/libGLESv2.framework
+      #   embed: true
+      #   codeSign: true
+      # EAGL GPU backend (ACTIVE — mutually exclusive with the ANGLE frameworks + RC_BACKEND_ANGLE):
+      - sdk: OpenGLES.framework
+    settings:
+      configs:
+        debug:
+          # `#if DEBUG` (ObjC) gates the on-device log/capture sinks + the on-screen console. The GLES macro is
+          # repeated here so it survives the per-config override regardless of $(inherited) chaining.
+          GCC_PREPROCESSOR_DEFINITIONS:
+            - "$(inherited)"
+            - "GLES_SILENCE_DEPRECATION=1"
+            - "DEBUG=1"
+          # Debug swaps in the file-sharing variant of the plist (Documents exposed over Files.app/USB for
+          # off-device log retrieval). INFOPLIST_KEY_* does NOT merge into a manual INFOPLIST_FILE in this
+          # toolchain (verified: the keys never reached the built plist), so we swap the WHOLE plist per-config.
+          # Info-Debug.plist must stay in sync with Info.plist except for the file-sharing block.
+          INFOPLIST_FILE: RuneMobile/Info-Debug.plist
+        release:
+          # No DEBUG -> the file sinks/console/rl-capture compile out. Release uses the base INFOPLIST_FILE
+          # (Info.plist), which OMITS the file-sharing keys -> Documents is not USB/Finder-exposed (QA-P1-12).
+          GCC_PREPROCESSOR_DEFINITIONS:
+            - "$(inherited)"
+            - "GLES_SILENCE_DEPRECATION=1"
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.audaro.runemobile
+        # Default/Release plist: the hardened one (no file-sharing). Debug overrides to Info-Debug.plist above.
+        INFOPLIST_FILE: RuneMobile/Info.plist
+        CODE_SIGN_ENTITLEMENTS: RuneMobile/RuneMobile.entitlements
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}   # set in ios/dev-tools/signing.env (gitignored) or your env
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        # Hello has no Obj-C/Swift dylib deps of its own; the JRE is dlopen'd at runtime.
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/Frameworks"
+        # GPU Route C bridge headers (RouteCBridge.h / routec_gl_jni.h) live under dev-tools/gpu-routec;
+        # routec_gl_jni.m does `#include <jni.h>`, resolved from the embedded JNI headers in RuneMobile/jni.
+        HEADER_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(SRCROOT)/../dev-tools/gpu-routec/app"
+          - "$(SRCROOT)/../dev-tools/gpu-routec/jni"
+          - "$(SRCROOT)/../dev-tools/gpu-zone/jni"
+          - "$(SRCROOT)/RuneMobile/jni"
+          # Khronos EGL/GLES3 headers for the MetalANGLE backend (gitignored; regenerate via gpu-angle/README).
+          - "$(SRCROOT)/../dev-tools/gpu-angle/include"
+        # ANGLE frameworks (libEGL/libGLESv2) live here for the linker + embed step.
+        FRAMEWORK_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(SRCROOT)/../dev-tools/gpu-angle/angle"
+    postBuildScripts:
+      - script: "\"${SRCROOT}/scripts/resign-jre.sh\""
+        name: "Re-sign embedded JRE"
+        basedOnDependencyAnalysis: false
+        # Runs after Copy Bundle Resources, before Xcode's final app signing.

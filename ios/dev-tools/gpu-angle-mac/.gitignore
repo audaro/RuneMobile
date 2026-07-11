@@ -1,0 +1,6 @@
+# third-party macOS ANGLE (extracted from Google Chrome) — not ours to commit
+angle/
+# build artifacts
+repro
+*.png
+*.o

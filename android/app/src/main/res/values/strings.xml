@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Product name. Distinct from "RuneScape"/"RuneLite": "Rune" is a generic word and this is not the
+         RuneLite project's client. The app carries an explicit unofficial/not-affiliated disclaimer in the
+         README + About surface (GATE criterion 9 / PROD-QA-07). -->
+    <string name="app_name">RuneMobile</string>
+</resources>

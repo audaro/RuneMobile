@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive launcher-icon foreground: a bold angular "Raido" rune (ᚱ, the Elder Futhark letter for the
+     "R" sound) in OSRS-gold. Original art — evokes "Rune" + the R of RuneMobile without borrowing any
+     RuneScape/RuneLite mark. Drawn inside the 72dp safe zone (18..90 of the 108 viewport). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFE6B14C"
+        android:pathData="M38,26 H50 V82 H38 Z M50,26 L74,40 L50,54 Z M50,50 L62,50 L78,82 L66,82 Z" />
+</vector>

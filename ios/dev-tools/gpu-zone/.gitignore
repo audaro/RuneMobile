@@ -1,0 +1,14 @@
+# xcodegen-generated (regenerate with `xcodegen generate`) + build output
+*.xcodeproj/
+build/
+# host-JVM assembler class files (regenerate with javac)
+*.class
+build-ios/
+build-sim/
+# B0.1 full vendored RLHD source (re-fetch per rlhd-src/PROVENANCE.md) + the staging work dir.
+# The Z0-sealed shader/assembler subset (rlhd-src/{shaders,java,LICENSE,PROVENANCE.md}) stays tracked.
+rlhd-src/src/
+stage-zone-work/
+scan-work/
+# device-pulled scratch logs (canonical copies live in evidence/)
+z0-device-*.log

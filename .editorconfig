@@ -1,0 +1,44 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# RuneLite (upstream) Java is tab-indented — match it.
+[*.java]
+indent_style = tab
+indent_size = 4
+tab_width = 4
+
+# Android app (Kotlin) — 4-space. ktlint reads these too.
+[*.{kt,kts}]
+indent_style = space
+indent_size = 4
+max_line_length = 140
+# Jetpack Compose @Composable functions are PascalCase by convention — don't flag them as bad names.
+ktlint_function_naming_ignore_when_annotated_with = Composable
+
+# iOS app (Swift) — Xcode default 4-space.
+[*.swift]
+indent_style = space
+indent_size = 4
+
+# Native bridge (C/C++/Obj-C) — 4-space.
+[*.{c,cc,cpp,h,hpp,m,mm}]
+indent_style = space
+indent_size = 4
+
+# Data/markup — 2-space is conventional.
+[*.{yml,yaml,json}]
+indent_size = 2
+
+# Markdown: two trailing spaces are a hard line break — don't strip them.
+[*.md]
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab

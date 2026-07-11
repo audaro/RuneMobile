@@ -1,0 +1,22 @@
+# detekt overrides for the Android Kotlin shell, layered on detekt's default ruleset
+# (the runner passes --build-upon-default-config). Run via tools/lint/detekt.sh.
+#
+# Philosophy: ktlint owns formatting/naming/line-length (single source of truth), so those are disabled
+# here to avoid duplicate, conflicting findings. MagicNumber is disabled because this is graphics/GL/bit-
+# flag code where numeric literals (colours, EGL constants, pixel geometry) are pervasive and naming each
+# would hurt readability. Everything else (potential-bugs, complexity, exception hygiene) stays ACTIVE —
+# existing violations are grandfathered in config/detekt/baseline.xml, so the rules enforce on NEW code.
+
+naming:
+  FunctionNaming:
+    active: false   # ktlint owns naming, incl. the Compose @Composable PascalCase exception
+  VariableNaming:
+    active: false   # ktlint owns naming (EGL/constant mirrors are @Suppressed there)
+  MatchingDeclarationName:
+    active: false   # multi-declaration files are intentional in this shell
+
+style:
+  MagicNumber:
+    active: false   # colours / EGL constants / pixel geometry — naming each literal hurts readability
+  MaxLineLength:
+    active: false   # ktlint enforces max_line_length = 140 as the single source of truth

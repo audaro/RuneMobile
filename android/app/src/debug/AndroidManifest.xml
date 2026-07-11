@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug-only manifest overlay. The Firebase Test Lab Game-Loop entry point (TEST_LOOP) is exported, so it is
+     declared HERE rather than in src/main so it ships only in debug builds — the release app exposes no exported
+     test surface (PROD-SECURITY-04). The manifest merger folds this intent-filter onto the main MainActivity. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity android:name=".MainActivity">
+            <!-- Firebase Test Lab Game Loop: launches the app uninterrupted (no Robo crawl/relaunch), so the long
+                 117HD boot -> login-screen -> startUp -> Zone shader compile gets its ~minute on real Mali. -->
+            <intent-filter>
+                <action android:name="com.google.intent.action.TEST_LOOP" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/javascript" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

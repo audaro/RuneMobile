@@ -1,0 +1,19 @@
+# deploy-remote.conf — copy to deploy-remote.conf (gitignored) and fill in for YOUR remote Mac.
+# Sourced by deploy-remote.sh.
+
+# Tailnet name (MagicDNS) or tailnet IP of the remote Mac tethered to the iPhone.
+#   tailscale status  ->  e.g. my-mac-mini  (or 100.x.y.z)
+REMOTE_HOST=my-mac-mini
+
+# SSH login user on the remote Mac.
+REMOTE_USER=youruser
+
+# Absolute path to the repo checkout on the remote Mac (deploy-remote.sh rsyncs INTO this; created if absent).
+REMOTE_REPO=/Users/youruser/runelite-ios
+
+# iPhone's devicectl UUID *as seen by the REMOTE Mac*. On the remote: xcrun devicectl list devices
+DEV_UUID=PUT-IPHONE-UUID-HERE
+
+# Optional overrides:
+# MODE=gpu                                   # gpu (jar-surgery) | cpu (plain shaded-jar copy)
+# JAVA_HOME=/opt/homebrew/opt/openjdk@21     # JDK 21 on the dev Mac (and remote, for --remote-jars)

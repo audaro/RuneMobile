@@ -1,0 +1,14 @@
+# ShellCheck configuration (applies to editor integrations and tools/lint/shellcheck.sh).
+#
+# We gate at --severity=warning (see tools/lint/shellcheck.sh). Lower-severity "note/info" findings
+# (e.g. SC2086 quoting hints, SC2012 ls-vs-find) are surfaced when you run shellcheck directly but
+# are not gate-blocking — they're style/defensive, not correctness bugs in these scripts.
+#
+# The single repo-wide mute below is the one genuinely-noisy check for this codebase:
+
+# SC2155 — "Declare and assign separately to avoid masking a return value."
+#   The pattern `local x="$(cmd)"` appears ~100x across the dev-tools harnesses. Here the masked
+#   exit status never matters: the very next line consumes $x and a failed command yields an empty
+#   string that the downstream check catches. Splitting all of them would be pure churn with no
+#   bug caught. Real `local x=$(cmd) || handle` cases don't exist in this tree.
+disable=SC2155

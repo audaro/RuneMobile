@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundleDisplayName</key>
+	<string>RuneMobile</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<!-- ProMotion: allow frame rates above 60fps on iPhone (the GPU path renders in ~3ms with huge headroom).
+	     Without this the CAEAGLLayer present is capped at 60Hz even on a 120Hz display. -->
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UIApplicationSupportsMultipleScenes</key>
+	<false/>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
+	<!-- Landscape-only: the game renders full-screen in landscape (Phase 5). -->
+	<key>UIRequiresFullScreen</key>
+	<true/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<!-- Background staying-power: `audio` keeps the process (and the JVM + game connection) running while
+	     the app is backgrounded — a silent mixable AVAudioEngine holds the session, and it is also what lets
+	     the system-driven Picture-in-Picture session keep rendering after the swipe-home. The in-game logout
+	     timer (RuneLite, up to 30 min) then governs how long the character stays logged in. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
+	<!-- Java Sound (libjsound.dylib) enumerates audio devices at RuneLite audio init —
+	     DAUDIO_GetDirectAudioDeviceCount -> DAUDIO_RequestRecordPermission touches the
+	     microphone, and iOS TCC SIGABRTs the app without this usage string (the §6.2
+	     deterministic ~3.6s post-main kill, hs_err-free, confirmed via the TCC crash
+	     report). We never record; the string only satisfies TCC so the probe is allowed. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>RuneLite's audio system enumerates audio devices at startup; this app does not record.</string>
+	<!-- RuneLite-account (config/plugin sync) sign-in uses the RFC-8252 loopback OAuth flow: SessionManager runs a
+	     local com.sun.net.httpserver.HttpServer on http://localhost:<port> and api.runelite.net redirects the
+	     SFSafariViewController back to that loopback URL. NSAllowsLocalNetworking whitelists loopback/.local/
+	     link-local hosts for ATS so any in-app cleartext request to that local server is permitted, WITHOUT
+	     globally disabling ATS (NSAllowsArbitraryLoads). Loopback only — no external cleartext is allowed. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<!-- THIS is the hardened plist used by Release (and as the default). File-sharing keys
+	     (UIFileSharingEnabled / LSSupportsOpeningDocumentsInPlace) are DELIBERATELY ABSENT here so Documents is
+	     not browsable over Files.app/USB (QA-P1-12). The Debug build swaps in Info-Debug.plist (project.yml
+	     per-config INFOPLIST_FILE), which is this file PLUS the file-sharing block, for off-device log retrieval.
+	     Keep the two plists in sync except that block. In Release the diagnostic sinks + rl-capture are also
+	     compiled out (`#if DEBUG`) and .runelite moves to App Support, so nothing sensitive lands in Documents.
+	     The session bearer (tokens.json) always lives in Library/Application Support, never surfaced by file
+	     sharing regardless of config. -->
+	<!-- Save in-game screenshots (the live composited frame) to the photo library via the 📷 HUD button. Add-only. -->
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Save your in-game screenshots to your photo library.</string>
+</dict>
+</plist>

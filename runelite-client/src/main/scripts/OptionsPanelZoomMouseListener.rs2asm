@@ -1,0 +1,71 @@
+.id                       1048
+.int_arg_count            3
+.long_arg_count           0
+.obj_arg_count            0
+; locals
+; 2 bar size
+   get_varbit             4606
+   iconst                 0
+   if_icmpne              LABEL4
+   jump                   LABEL5
+LABEL4:
+   return                
+LABEL5:
+   iconst                 512
+   istore                 3
+   iconst                 512
+   istore                 4
+   iload                  1
+   if_getwidth           
+   iload                  0
+   if_getwidth           
+   sub                   
+   istore                 5
+   iconst                 0
+   iload                  2
+   invoke                 1045
+   istore                 2
+   iload                  1
+   if_getwidth           
+   iload                  0
+   if_getwidth           
+   sub                   
+   iload                  2
+   invoke                 1046
+   istore                 2
+   get_varc_int           1341
+   get_varc_int           1340
+   sub                   
+   istore                 6
+   get_varc_int           1339
+   get_varc_int           1338
+   sub                   
+   istore                 7
+   iload                  2
+   iload                  6
+   multiply              
+   iload                  5
+   div                   
+   iload                  6
+   sconst                 "zoomLinToExp"
+   runelite_callback     
+   pop_int               
+   get_varc_int           1340
+   add                   
+   istore                 3
+   iload                  2
+   iload                  7
+   multiply              
+   iload                  5
+   div                   
+   iload                  7
+   sconst                 "zoomLinToExp"
+   runelite_callback     
+   pop_int               
+   get_varc_int           1338
+   add                   
+   istore                 4
+   iload                  4
+   iload                  3
+   invoke                 42
+   return                

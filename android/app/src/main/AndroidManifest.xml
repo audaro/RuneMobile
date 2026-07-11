@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- AP-2a Finding 9: deliver in-game notifications (idle/level-up/etc) to the system shade. Runtime-granted
+         on API 33+ (requested on first boot); a no-op grant below that. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- AP-2b Finding 5: legacy gallery write for the screenshot save. API 29+ uses scoped storage (no
+         permission); only pre-Q needs this, so it's capped at API 28. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
+    <!-- Android TV (Shield) support: TV-optional so it installs + lists on the leanback home screen, and
+         touchscreen-optional since a TV has none (the leanback launcher hides apps that require touch). -->
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
+    <application
+        android:allowBackup="false"
+        android:allowNativeHeapPointerTagging="false"
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:banner="@drawable/tv_banner"
+        android:supportsRtl="true"
+        android:extractNativeLibs="true"
+        android:theme="@style/Theme.AppCompat.NoActionBar">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode|locale|density|smallestScreenSize"
+            android:screenOrientation="sensorLandscape">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <!-- LEANBACK_LAUNCHER = show as an icon on the Android TV / Shield home screen (a phone-only
+                     LAUNCHER app is installed but hidden there). On a TV the icon boots straight into 117HD. -->
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+            <!-- The Firebase Test Lab Game-Loop entry point (com.google.intent.action.TEST_LOOP) lives in
+                 src/debug/AndroidManifest.xml so it ships ONLY in debug builds — the release app exposes no
+                 exported test surface (PROD-SECURITY-04). The manifest merger folds it onto this activity in debug. -->
+        </activity>
+
+        <!-- A3 on-device Jagex login: consent flow runs in a Chrome Custom Tab (real Chrome clears Cloudflare;
+             the embedded WebView is bot-blocked at the auth step), the http://localhost redirect link is brought
+             back via clipboard/paste. Not exported; landscape to match the shell. -->
+        <activity
+            android:name=".LoginActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode|locale|density|smallestScreenSize"
+            android:screenOrientation="sensorLandscape" />
+    </application>
+</manifest>

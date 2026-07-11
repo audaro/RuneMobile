@@ -1,0 +1,94 @@
+# RuneMobile upstream sync — poll runelite/runelite and merge new upstream work into master automatically.
+#
+# Every OSRS weekly update bumps the client revision upstream; until that bump lands here the app dies at
+# login with js5connect_outofdate. This workflow polls upstream every 6 hours and, when upstream/master has
+# new commits, merges them into master, runs a fast gate (client compiles + cross-port contract intact), and
+# pushes. The push is PAT-authenticated so it fires the runemobile-release workflow — a clean upstream bump
+# therefore ships as a rolling APK+IPA with zero manual steps.
+#
+# Failure modes are loud, not clever: a merge conflict or compile break fails the run (GitHub emails the
+# owner) and leaves master untouched. Resolve those locally per the usual upstream-merge playbook
+# (fetch upstream → merge → fix API breaks → push) — see tools/ci/README.md.
+name: upstream-sync
+
+on:
+  schedule:
+    - cron: '23 */6 * * *' # 4x/day; OSRS updates land Wednesdays and upstream usually bumps within hours
+  workflow_dispatch:
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    # Same immutable-id guard as runemobile-release: this job only ever runs in the private origin repo
+    # (where the trusted runner lives); it is inert in the public mirror and in any fork.
+    if: github.repository_id == '1253608468'
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 45
+    permissions:
+      # Pushes use SYNC_TOKEN, not GITHUB_TOKEN: a GITHUB_TOKEN push would not trigger the release
+      # workflow (GitHub suppresses workflow-to-workflow recursion for the built-in token).
+      contents: read
+    env:
+      JAVA_HOME: /opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
+    steps:
+      - name: Require SYNC_TOKEN
+        env:
+          HAVE_TOKEN: ${{ secrets.SYNC_TOKEN != '' }}
+        run: |
+          [ "$HAVE_TOKEN" = "true" ] || {
+            echo "::error::SYNC_TOKEN secret is missing (fine-grained PAT, Contents read/write on THIS repo) — see tools/ci/README.md"
+            exit 1
+          }
+
+      # Pinned to a full commit SHA (not the mutable @v4 tag) — same rationale as runemobile-release.
+      # persist-credentials is OFF: the gate step below executes Gradle from the freshly-merged tree, and the
+      # token must not sit in .git/config while (or after) that runs — the push step gets it scoped via env.
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: master
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN }}
+          persist-credentials: false
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/runelite/runelite.git 2>/dev/null \
+            || git remote set-url upstream https://github.com/runelite/runelite.git
+          git fetch --no-tags upstream master
+
+      - name: Merge upstream/master (no-op when already current)
+        run: |
+          if git merge-base --is-ancestor upstream/master HEAD; then
+            echo "Already up to date with upstream/master."
+            echo "MERGED=0" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          git config user.name  "Jordan Simpson"
+          git config user.email "sayhijordy@gmail.com"
+          if ! git merge --no-edit upstream/master; then
+            git merge --abort || true
+            echo "::error::Upstream merge conflict — master left untouched; resolve locally and push (tools/ci/README.md)."
+            exit 1
+          fi
+          echo "MERGED=1" >> "$GITHUB_ENV"
+
+      # Fast gate only: catches upstream API breaks against our client/bridge code and cross-port contract
+      # drift before anything is pushed. The full signed build + publish happens in runemobile-release,
+      # which this push triggers.
+      - name: Gate — client compiles + cross-port contract intact
+        if: env.MERGED == '1'
+        run: |
+          ./gradlew --no-daemon :client:compileJava
+          ./android/dev-tools/ci/release-gate.sh --contract-only
+
+      # Token supplied only to this step (checkout persisted nothing); git redacts URL userinfo in its output
+      # and Actions masks the secret besides.
+      - name: Push (fires the rolling release)
+        if: env.MERGED == '1'
+        env:
+          SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
+        run: git push "https://x-access-token:${SYNC_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" master:master

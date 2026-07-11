@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+    - name: Question or discussion
+      url: https://github.com/audaro/runemobile/discussions
+      about: Questions, ideas, and support — please search or start a discussion before filing an issue.
+    - name: Security report
+      url: https://github.com/audaro/runemobile/security/advisories/new
+      about: Report a security issue privately (do not open a public issue).

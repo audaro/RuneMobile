@@ -1,0 +1,6 @@
+# constants not found in GL45C (route to EXT/other facade):
+GL_EXT_
+GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT
+GL_PIXEL_UNPACK_BUFFER_ARB
+GL_TEXTURE_MAX_ANISOTROPY_EXT
+# methods not found in GL45C:

@@ -1,0 +1,3 @@
+# Fetched artifacts — never commit.
+fb-logcat*.txt
+*.log

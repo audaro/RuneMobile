@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Notification small-icon: the Raido rune as a white silhouette (the status bar tints it). Same glyph as
+     the launcher foreground so the brand reads consistently under every notification (ENH-A09b). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M38,26 H50 V82 H38 Z M50,26 L74,40 L50,54 Z M50,50 L62,50 L78,82 L66,82 Z" />
+</vector>

@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+# Pre-commit gate. Two responsibilities:
+#   1) Hygiene/security — no secrets, signing keys, generated artifacts, or local-only development
+#      scaffolding may enter the tree (Actions are disabled on this fork, so this is the gate).
+#   2) Cross-port contract — flag staged changes to the shared iOS/Android jar surface and block when the
+#      host-facing bridge/boot API + -D gate flags drift without a refreshed baseline.
+#
+# Install once per clone:  tools/git-hooks/install.sh   (sets core.hooksPath = tools/git-hooks)
+# Emergency bypass:        git commit --no-verify
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+staged="$(git diff --cached --name-only)"                      # full list (contract guard)
+staged_am="$(git diff --cached --name-only --diff-filter=AM)"  # added/modified (hygiene)
+
+# ── 1) Hygiene / security (runs on every commit) ──────────────────────────────────────────────────────
+hy_fail=0
+hflag() { printf '  - %s\n' "$1"; hy_fail=1; }
+
+if [ -n "$staged_am" ]; then
+	while IFS= read -r f; do
+		[ -z "$f" ] && continue
+		matched=0
+		# Critical, config-independent: credentials/keys and the generated artifact must never land,
+		# even if someone deletes the .gitignore entry for them.
+		case "$f" in
+			*tokens.json|*legacy_login.json|*.jks|*.keystore|*keystore.properties)
+				hflag "secret/key file staged: $f"; matched=1 ;;
+			*jvm-resources/probes.jar)
+				hflag "generated artifact staged (never commit): $f"; matched=1 ;;
+		esac
+		# General catch: anything force-added past a gitignore / .git/info/exclude rule (local-only
+		# dev scaffolding, build output, …). No hardcoded list to rot — the patterns live in the
+		# ignore rules, not here.
+		if [ "$matched" -eq 0 ] && git check-ignore --no-index -q -- "$f"; then
+			hflag "ignored file force-added: $f  (local-only / scaffolding stays untracked)"
+		fi
+	done <<< "$staged_am"
+
+	# Content checks on added lines: block private-key material that slips into the tree.
+	added="$(git diff --cached --diff-filter=AM -U0 -- . \
+		| grep -E '^\+' | grep -vE '^\+\+\+' || true)"
+	if [ -n "$added" ]; then
+		pk="$(printf '%s\n' "$added" | grep -nE 'BEGIN (RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY' || true)"
+		[ -n "$pk" ] && hflag "private-key material in staged content"
+	fi
+
+	# gitleaks if installed (optional, stronger staged-secret scan).
+	if command -v gitleaks >/dev/null 2>&1; then
+		gitleaks protect --staged --no-banner --redact >/dev/null 2>&1 \
+			|| hflag "gitleaks flagged staged content (run: gitleaks protect --staged --verbose)"
+	fi
+
+	# Run ShellCheck on staged shell scripts if installed (optional). Warning severity; .shellcheckrc applies.
+	if command -v shellcheck >/dev/null 2>&1; then
+		sh_staged="$(printf '%s\n' "$staged_am" | grep -E '\.sh$' | grep -vE '(^|/)gradlew$' || true)"
+		if [ -n "$sh_staged" ]; then
+			sc_out="$(printf '%s\n' "$sh_staged" | xargs shellcheck -f gcc --severity=warning 2>/dev/null || true)"
+			if [ -n "$sc_out" ]; then
+				hflag "shellcheck findings in staged scripts (fix or add a justified '# shellcheck disable=SCxxxx'):"
+				printf '%s\n' "$sc_out" | sed 's/^/      /'
+			fi
+		fi
+	fi
+
+	# Run ktlint on staged Kotlin if installed (optional). Config in .editorconfig; auto-fix: ktlint --format.
+	if command -v ktlint >/dev/null 2>&1; then
+		kt_staged="$(printf '%s\n' "$staged_am" | grep -E '^android/.*\.(kt|kts)$' | grep -vE '(^|/)gradlew$' || true)"
+		if [ -n "$kt_staged" ]; then
+			kt_out="$(printf '%s\n' "$kt_staged" | xargs ktlint --relative 2>/dev/null || true)"
+			if [ -n "$kt_out" ]; then
+				hflag "ktlint findings in staged Kotlin (auto-fix: ktlint --format <files>):"
+				printf '%s\n' "$kt_out" | sed 's/^/      /'
+			fi
+		fi
+	fi
+
+	# Run clang-format on staged native if installed (optional). Incremental: only CHANGED lines must
+	# conform (the existing hand-aligned tree is grandfathered); vendored JDK headers are excluded by the runner.
+	if command -v git-clang-format >/dev/null 2>&1; then
+		cf_staged="$(printf '%s\n' "$staged_am" | grep -E '\.(c|cc|cpp|cxx|h|hpp|m|mm)$' | grep -vE 'ios/app/RuneMobile/jni/' || true)"
+		if [ -n "$cf_staged" ]; then
+			set +e
+			cf_out="$("$ROOT/tools/lint/clang-format.sh" --staged 2>&1)"; cf_rc=$?
+			set -e
+			if [ "$cf_rc" -ne 0 ]; then
+				hflag "clang-format findings in staged native code (apply: git clang-format --staged):"
+				printf '%s\n' "$cf_out" | sed 's/^/      /'
+			fi
+		fi
+	fi
+
+	if [ "$hy_fail" -ne 0 ]; then
+		echo
+		echo "✋ pre-commit BLOCKED (hygiene). Resolve the items above, or override with 'git commit --no-verify'."
+		exit 1
+	fi
+fi
+
+# ── 1b) Jagex OAuth wire-contract guard ───────────────────────────────────────────────────────────────
+# The three login impls (iOS .m / Android .kt / fetch-shield-tokens.sh) each re-mint tokens.json in their
+# own runtime BEFORE the JVM boots, so the HTTP legs can't share one bridge (OAUTH-1). auth-contract.json
+# is the source of truth; block if a staged login change drifts a pinned endpoint / UA / client-id / scope
+# / response key from the others. Editing the JSON is the acknowledgement — no separate baseline to stage.
+authfiles="$(printf '%s\n' "$staged" | grep -E '^(ios/app/RuneMobile/JagexLoginViewController\.m|android/app/src/main/java/dev/audaro/runemobile/JagexLogin\.kt|ios/dev-tools/fetch-shield-tokens\.sh|tools/shared-contract/(auth-contract\.json|check-auth-contract\.(sh|py)))$' || true)"
+if [ -n "$authfiles" ]; then
+	set +e
+	areport="$("$ROOT/tools/shared-contract/check-auth-contract.sh" 2>&1)"; arc=$?
+	set -e
+	echo "$areport"
+	if [ "$arc" -ne 0 ]; then
+		echo
+		echo "✋ BLOCKED: Jagex OAuth wire contract drift (see above)."
+		echo "   Restore the value in the flagged port, or — if Jagex changed it — update auth-contract.json"
+		echo "   AND every listed port in this same commit.  (Emergency bypass: git commit --no-verify)"
+		exit 1
+	fi
+fi
+
+# ── 2) Cross-port contract guard ──────────────────────────────────────────────────────────────────────
+# Tier 1 — any staged change that lands in the jars BOTH ports embed?
+shared="$(printf '%s\n' "$staged" | grep -E '^(runelite-client/|ios/dev-tools/awtsmoke/|tools/stage-.*\.sh)' || true)"
+[ -z "$shared" ] && exit 0
+
+echo "──────────────────────────────────────────────────────────────────────"
+echo "⚠  SHARED CHANGE — these staged files feed the jars BOTH iOS & Android embed:"
+printf '%s\n' "$shared" | sed 's/^/     /'
+echo "──────────────────────────────────────────────────────────────────────"
+
+# Tier 2 — did the host-facing CONTRACT (bridge/boot API + gate flags) change?
+set +e
+report="$("$ROOT/tools/shared-contract/check-contract.sh" 2>&1)"
+rc=$?
+set -e
+echo "$report"
+
+if [ "$rc" -eq 0 ]; then
+	echo "Contract unchanged — shared engine/impl change only; both ports build the same surface. OK to commit."
+	exit 0
+fi
+
+# Contract changed. Allow only if the refreshed baseline is staged in this same commit (= acknowledged).
+if printf '%s\n' "$staged" | grep -qx 'tools/shared-contract/baseline.txt'; then
+	echo
+	echo "✅ baseline.txt is staged → change acknowledged. Confirm you verified the OTHER port:"
+	echo "     Android:  ./android/dev-tools/bridge-census/run-census-desktop.sh   (expect GREEN)"
+	echo "     iOS:      rebuild the client jar + run the iOS bridge checks"
+	exit 0
+fi
+
+echo
+echo "✋ BLOCKED: the shared contract changed but tools/shared-contract/baseline.txt is NOT staged."
+[ "$rc" -eq 2 ] && echo "   REMOVED/CHANGED entries above are a real risk of breaking the OTHER port."
+echo "   Resolve, then re-commit:"
+echo "     1) Verify the other port still works against the new contract:"
+echo "          Android:  ./android/dev-tools/bridge-census/run-census-desktop.sh"
+echo "          iOS:      rebuild the client jar + run the iOS bridge checks"
+echo "     2) Acknowledge by refreshing + staging the baseline:"
+echo "          ./tools/shared-contract/check-contract.sh --update && git add tools/shared-contract/baseline.txt"
+echo "   (Emergency bypass: git commit --no-verify)"
+exit 1

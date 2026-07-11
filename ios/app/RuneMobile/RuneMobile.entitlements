@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  the W1-audit Claim D (SUPPORTED, with correction):
+	   - iOS device JIT comes from get-task-allow + StikDebug attach -> CS_DEBUGGED,
+	     NOT from entitlements. get-task-allow is set by the (free-cert) Development
+	     provisioning profile at sign time — do NOT hardcode it here (profile conflict).
+	   - macOS hardened-runtime keys (com.apple.security.cs.allow-jit, etc.) are no-ops
+	     on iOS device — intentionally absent.
+	   - Request ONLY memory headroom. AltStore 2.2+ injects this on a free cert.
+	   - Hello itself needs little RAM; if a direct/free-cert sign REJECTS this key,
+	     drop it for the Hello milestone (it is only needed once RuneLite is loaded).
+	-->
+	<key>com.apple.developer.kernel.increased-memory-limit</key>
+	<true/>
+</dict>
+</plist>

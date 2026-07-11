@@ -1,0 +1,35 @@
+name: GpuPresent
+options:
+  bundleIdPrefix: dev.audaro
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+targets:
+  GpuPresent:
+    type: application
+    platform: iOS
+    sources:
+      - path: app
+    dependencies:
+      # ANGLE (libEGL + libGLESv2, Metal backend) — reuse the gpu-angle vendored copy (gitignored; regenerate via
+      # gpu-angle/README). Embedded + codesigned so the app can dlopen them on device.
+      - framework: ../gpu-angle/angle/libEGL.framework
+        embed: true
+        codeSign: true
+      - framework: ../gpu-angle/angle/libGLESv2.framework
+        embed: true
+        codeSign: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.audaro.gpupresent
+        GENERATE_INFOPLIST_FILE: "YES"
+        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: "YES"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        # Khronos EGL/GLES3 headers from the gpu-angle vendored copy (gitignored; regenerate via gpu-angle/README).
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/../gpu-angle/include"
+        FRAMEWORK_SEARCH_PATHS: "$(SRCROOT)/../gpu-angle/angle"
+        CLANG_ENABLE_OBJC_ARC: "YES"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"

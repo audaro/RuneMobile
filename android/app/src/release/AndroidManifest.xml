@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- COMPAT-03 (GATE.md row 10): scope Android TV OUT of the v1 release. The isTv turnkey path force-boots the
+     HEAVIEST renderer (117HD) with no caps re-probe, and it has NEVER run on real TV-class GPU hardware —
+     Firebase Test Lab carries no physical TV device (only SwiftShader virtual TV emulators), so there is no
+     way to gate it. A release must therefore not advertise itself on the leanback (Android TV / Shield) home
+     screen. This release-only manifest removes the LEANBACK_LAUNCHER category from MainActivity's launcher
+     intent-filter; the debug build keeps it (src/main) for on-TV development. Phone behaviour is unchanged
+     (the normal LAUNCHER category stays). Revisit if/when a real TV device is in the test matrix.
+
+     Lint: the TV checks (MissingTvBanner / MissingLeanbackSupport / ImpliedTouchscreenHardware) fire on this
+     overlay STANDALONE because it repeats the launcher intent-filter (it must, to carry the tools:node=remove)
+     — but the whole point of the file is that the MERGED release manifest has no leanback support, so the TV
+     obligations don't apply. Suppressed here, scoped to this overlay only; src/main stays fully linted. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:ignore="MissingTvBanner,MissingLeanbackSupport,ImpliedTouchscreenHardware">
+
+    <application>
+        <!-- android:exported repeated from src/main (same value) purely so this overlay is
+             lint-complete standalone (IntentFilterExportedReceiver checks each source file). -->
+        <activity android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER"
+                    tools:node="remove" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

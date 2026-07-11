@@ -1,0 +1,4 @@
+# Secrets + fetched artifacts — never commit.
+bs-credentials.env
+bs-devicelogs*.txt
+*.log

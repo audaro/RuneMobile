@@ -1,0 +1,45 @@
+# Normalise line endings on commit; let git infer text vs binary, default checkouts to LF.
+* text=auto eol=lf
+
+# Scripts must stay LF even on a Windows checkout.
+*.sh   text eol=lf
+gradlew text eol=lf
+
+# Explicit binaries — never normalise, never diff as text.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.jar  binary
+*.so   binary
+*.dylib binary
+*.a    binary
+*.dll  binary
+*.ttf  binary
+*.otf  binary
+*.jks  binary
+*.keystore binary
+*.bin  binary
+*.dat  binary
+*.idx  binary
+*.mp4  binary
+*.mov  binary
+
+# ── GitHub Linguist: show THIS project's code, not the vendored upstream ──
+# This repo is a fork of runelite/runelite carried as-is. Mark the unmodified upstream
+# modules as vendored so the language bar reflects the native ports (android/, ios/, tools/).
+runelite-api/**           linguist-vendored
+runelite-client/**        linguist-vendored
+runelite-jshell/**        linguist-vendored
+runelite-gradle-plugin/** linguist-vendored
+cache/**                  linguist-vendored
+# …but the headless bridge inside runelite-client is our own work — re-include it.
+runelite-client/src/main/java/net/runelite/client/headless/** linguist-vendored=false
+
+# Built/staged artifacts are not source.
+*.jar                    linguist-generated
+ios/app/jvm-resources/** linguist-generated

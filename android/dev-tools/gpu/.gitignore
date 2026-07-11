@@ -1,0 +1,4 @@
+# Jar-surgery scratch (recreated each run by stage-android-gpu-jar.sh / stage-rlhd-zone-jar.sh).
+stage-work/
+stage-rlhd-work/
+rlhd-src/

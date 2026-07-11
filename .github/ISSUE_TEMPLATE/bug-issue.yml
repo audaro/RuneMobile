@@ -1,0 +1,83 @@
+name: Bug Report
+description: Report a clearly broken issue in the mobile client.
+labels: ["needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        # Bug report
+
+        Before filing:
+        - Reproduce with third-party hub plugins disabled where possible (they run
+          with full JVM privileges and are not maintained here).
+        - Search existing issues and Discussions first.
+        - **Never paste a real `session_id`, `id_token`, token, or password.**
+          Redact your account display name in logs and screenshots.
+  - type: dropdown
+    attributes:
+      label: Type
+      options:
+        - Crash or hang
+        - Incorrect behavior
+        - Performance
+        - Rendering (CPU / GPU / 117HD)
+        - Login / account
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    attributes:
+      label: Platform
+      options:
+        - Android
+        - iOS
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Device & OS version
+      description: e.g. Pixel 7a / Android 16, or iPhone 17 Pro Max / iOS 26.5.
+    validations:
+      required: true
+  - type: dropdown
+    attributes:
+      label: Renderer
+      options:
+        - CPU
+        - GPU
+        - 117HD
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Build identifier
+      description: The Release tag, the commit SHA you built from, or "local build".
+      placeholder: e.g. v0.3.1, or commit a1b2c3d, or "local build"
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Bug description
+      description: What happened, what you expected, and how to reproduce.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Screenshots or videos
+    validations:
+      required: false
+  - type: textarea
+    attributes:
+      label: Logs (redacted)
+      description: Attach redacted logcat / console output. Remove any tokens or display names first.
+    validations:
+      required: false
+  - type: checkboxes
+    attributes:
+      label: Confirmation
+      options:
+        - label: I am using a throwaway account (this client is not on Jagex's approved list).
+          required: true
+        - label: I have redacted tokens and account identifiers from anything attached.
+          required: true

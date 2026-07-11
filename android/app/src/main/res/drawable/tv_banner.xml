@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android TV home-screen banner (320x180dp tile). Plain OSRS-toned gradient; the launcher overlays the
+     app label ("RuneMobile"). Banner-only now — the phone/launcher icon is the adaptive @mipmap/ic_launcher. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:startColor="#FF1A1208"
+                android:centerColor="#FF2A1B0C"
+                android:endColor="#FF3A2510"
+                android:angle="90" />
+        </shape>
+    </item>
+</layer-list>

@@ -1,0 +1,4 @@
+GpuTbo2d.xcodeproj/
+build/
+*.app
+DerivedData/

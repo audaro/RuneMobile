@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive launcher-icon background: the OSRS-toned brown gradient (same palette as the TV banner).
+     The adaptive-icon system bleeds this to the full 108dp canvas behind the foreground glyph. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient
+        android:startColor="#FF1A1208"
+        android:centerColor="#FF2A1B0C"
+        android:endColor="#FF3A2510"
+        android:angle="90" />
+</shape>
