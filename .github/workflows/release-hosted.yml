@@ -78,9 +78,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$CI_CONFIG_DIR"
-          # Android: keystore.properties references storeFile=android/app/release.jks (relative to repo root)
-          printf '%s' "$ANDROID_KEYSTORE_PROPERTIES" > "$CI_CONFIG_DIR/keystore.properties"
-          echo "$ANDROID_KEYSTORE_B64" | base64 --decode > android/app/release.jks
+          # Android: write passwords/alias from the secret, decode the keystore, and pin storeFile to the
+          # runner's absolute path (appended last so it wins over any stale storeFile the secret may carry).
+          printf '%s\n' "$ANDROID_KEYSTORE_PROPERTIES" > "$CI_CONFIG_DIR/keystore.properties"
+          echo "$ANDROID_KEYSTORE_B64" | base64 --decode > "$GITHUB_WORKSPACE/android/app/release.jks"
+          printf 'storeFile=%s\n' "$GITHUB_WORKSPACE/android/app/release.jks" >> "$CI_CONFIG_DIR/keystore.properties"
           # iOS: DEVELOPMENT_TEAM + keychain password consumed by build-release-artifacts.sh
           printf 'DEVELOPMENT_TEAM=%s\n' "$IOS_DEVELOPMENT_TEAM" > "$CI_CONFIG_DIR/signing.env"
           printf '%s' "$IOS_KEYCHAIN_PASSWORD" > "$CI_CONFIG_DIR/keychain.pw"
