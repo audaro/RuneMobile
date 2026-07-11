@@ -1,9 +1,11 @@
 # RuneMobile rolling release — FULLY HOSTED on GitHub (no self-hosted Mac, no private repo).
 #
-# Builds a signed APK + IPA on a GitHub-hosted macOS runner and publishes them as a rolling prerelease on
-# THIS repo. It reuses the existing, tested build/publish scripts (tools/ci/*.sh) verbatim — the only new work
-# is provisioning their four inputs (Android keystore, iOS signing identity, keychain, iOS JRE) from GitHub
-# secrets + a release asset instead of the developer Mac's ~/.runemobile-ci.
+# Builds a release APK + IPA on a GitHub-hosted macOS runner and publishes them as a rolling prerelease on
+# THIS repo. The APK is release-signed with the 45:E3 key; the IPA is Xcode-signed then re-stamped for
+# versioning (which invalidates that signature — harmless, because AltStore/SideStore re-sign the IPA on-device
+# at install, the only supported way to run it). It reuses the tested build/publish scripts (tools/ci/*.sh)
+# verbatim — the only new work is provisioning their four inputs (Android keystore, iOS signing identity,
+# keychain, iOS JRE) from GitHub secrets + a release asset instead of the developer Mac's ~/.runemobile-ci.
 #
 # ── STATUS: DRAFT ────────────────────────────────────────────────────────────────────────────────────────
 # Manual-trigger ONLY (workflow_dispatch) until proven, so it can't fail noisily before the secrets exist.
@@ -38,14 +40,19 @@ concurrency:
 
 jobs:
   build-and-publish:
-    # Runs only on the canonical public repo (id 1296635776) — inert in forks so a fork's dispatch can never
-    # spend this repo's secrets. Fork PRs never receive secrets regardless; this is defense in depth.
-    if: github.repository_id == '1296635776'
+    # Runs only on the canonical public repo (id 1296635776) AND only against master — so a workflow_dispatch
+    # (or later push) on any other branch can't run untrusted code with the production signing secrets. Inert
+    # in forks; fork PRs never receive secrets regardless — this is defense in depth. (Optional further
+    # hardening: bind this job to a `production` deployment environment whose deployment branch is master.)
+    if: github.repository_id == '1296635776' && github.ref == 'refs/heads/master'
     runs-on: macos-14
     permissions:
       contents: write   # publish the rolling release to THIS repo (no PUBLISH_TOKEN needed anymore)
     env:
-      BUILD_NUMBER: ${{ github.run_number }}
+      # Offset past the retiring self-hosted pipeline's run count (~10s) so hosted builds are always strictly
+      # newer: Android versionCode = 1_000_000 + BUILD_NUMBER must never regress across the self-hosted→hosted
+      # cutover. github.run_number restarts at 1 for this new workflow file, hence the offset.
+      BUILD_NUMBER: ${{ github.run_number + 1000 }}
       GIT_SHA: ${{ github.sha }}
       REQUIRE_RELEASE_KEY: "1"           # refuse to publish anything not signed by the real release key
       CI_CONFIG_DIR: ${{ runner.temp }}/runemobile-ci
