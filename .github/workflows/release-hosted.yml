@@ -1,29 +1,25 @@
 # RuneMobile rolling release — FULLY HOSTED on GitHub (no self-hosted Mac, no private repo).
 #
-# Builds a release APK + IPA on a GitHub-hosted macOS runner and publishes them as a rolling prerelease on
-# THIS repo. The APK is release-signed with the 45:E3 key; the IPA is Xcode-signed then re-stamped for
-# versioning (which invalidates that signature — harmless, because AltStore/SideStore re-sign the IPA on-device
-# at install, the only supported way to run it). It reuses the tested build/publish scripts (tools/ci/*.sh)
-# verbatim — the only new work is provisioning their four inputs (Android keystore, iOS signing identity,
-# keychain, iOS JRE) from GitHub secrets + a release asset instead of the developer Mac's ~/.runemobile-ci.
+# Builds a release APK + an ad-hoc-signed IPA on a GitHub-hosted macOS runner and publishes them as a rolling
+# prerelease on THIS repo. The APK is release-signed with the 45:E3 key (it installs directly). The IPA is
+# ad-hoc-signed only — AltStore/SideStore re-sign it on-device at install, the only supported way to run it, so
+# CI needs no Apple cert/profile/team. It reuses the tested build/publish scripts (tools/ci/*.sh) verbatim; the
+# only new work is providing their two inputs (Android keystore + iOS JRE) from a GitHub secret + a release
+# asset instead of the developer Mac's ~/.runemobile-ci.
 #
 # ── STATUS: DRAFT ────────────────────────────────────────────────────────────────────────────────────────
 # Manual-trigger ONLY (workflow_dispatch) until proven, so it can't fail noisily before the secrets exist.
-# Once a manual run produces a real signed APK + IPA, flip the trigger to `push: branches: [master]` and this
+# Once a manual run produces a release APK + an installable IPA, flip the trigger to `push: branches: [master]` and this
 # becomes the "every merge to master rebuilds + releases both apps" pipeline.
 #
-# ── REQUIRED SETUP (one-time, done by the repo owner) ────────────────────────────────────────────────────
+# ── REQUIRED SETUP (one-time, done by the repo owner — run tools/ci/setup-hosted-secrets.sh) ─────────────
+# Only ANDROID needs real signing material — the APK installs directly, so it must carry the release key. The
+# IPA is ad-hoc-signed and re-signed on-device by AltStore/SideStore, so NO Apple cert/profile is uploaded.
 # Repository secrets (Settings → Secrets and variables → Actions):
 #   ANDROID_KEYSTORE_B64        base64 of the release .jks
-#   ANDROID_KEYSTORE_PROPERTIES full keystore.properties, with storeFile=android/app/release.jks (relative)
-#   IOS_CERT_P12_B64            base64 of the Apple signing identity .p12 (cert + private key)
-#   IOS_CERT_PASSWORD           password used when exporting the .p12
-#   IOS_PROVISIONING_PROFILE_B64 base64 of the .mobileprovision (manual signing)
-#   IOS_KEYCHAIN_PASSWORD       any strong string — the ephemeral runner keychain password
-#   IOS_DEVELOPMENT_TEAM        the 10-char Apple Team ID
-# Release asset (the iOS JRE, ~166 MB, not URL-reproducible):
-#   gh release create ios-jre-dep --repo <owner>/<repo> -t "iOS JRE build dependency" -n "Build input; not a release." \
-#     <(cd ios/dev-tools && tar czf - jre)   # or attach ios-jre.tar.gz built from ~/.runemobile-ci/ios-jre
+#   ANDROID_KEYSTORE_PROPERTIES keystore.properties minus storeFile (this workflow pins storeFile itself)
+# Release asset (the iOS JRE, ~166 MB, not URL-reproducible), uploaded by the same helper:
+#   gh release create ios-jre-dep <jre.tar.gz> --repo <owner>/<repo> --prerelease
 #   (Publishing an OpenJDK build is fine — GPLv2+CE, and it already ships inside every IPA.)
 
 name: release-hosted
@@ -54,7 +50,8 @@ jobs:
       # cutover. github.run_number restarts at 1 for this new workflow file, hence the offset.
       BUILD_NUMBER: ${{ github.run_number + 1000 }}
       GIT_SHA: ${{ github.sha }}
-      REQUIRE_RELEASE_KEY: "1"           # refuse to publish anything not signed by the real release key
+      REQUIRE_RELEASE_KEY: "1"           # refuse to publish an APK not signed by the real release key
+      IOS_ADHOC: "1"                     # ad-hoc-sign the IPA — AltStore/SideStore re-signs it on-device
       CI_CONFIG_DIR: ${{ runner.temp }}/runemobile-ci
     steps:
       - name: Checkout
@@ -76,46 +73,21 @@ jobs:
       - name: Contract pre-flight (fast, non-bypassable)
         run: ./android/dev-tools/ci/release-gate.sh --contract-only
 
-      - name: Materialize signing/config from secrets  (nothing here is echoed)
+      - name: Materialize Android signing from secrets  (nothing here is echoed)
         env:
           ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
           ANDROID_KEYSTORE_PROPERTIES: ${{ secrets.ANDROID_KEYSTORE_PROPERTIES }}
-          IOS_DEVELOPMENT_TEAM: ${{ secrets.IOS_DEVELOPMENT_TEAM }}
-          IOS_KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
         run: |
           set -euo pipefail
           mkdir -p "$CI_CONFIG_DIR"
-          # Android: write passwords/alias from the secret, decode the keystore, and pin storeFile to the
-          # runner's absolute path (appended last so it wins over any stale storeFile the secret may carry).
+          # Android is the only real signer: the APK installs directly (no re-signer), so it needs the release
+          # key. Write passwords/alias from the secret, decode the keystore, and pin storeFile to the runner's
+          # absolute path (appended last so it wins over any stale storeFile the secret may carry).
           printf '%s\n' "$ANDROID_KEYSTORE_PROPERTIES" > "$CI_CONFIG_DIR/keystore.properties"
           echo "$ANDROID_KEYSTORE_B64" | base64 --decode > "$GITHUB_WORKSPACE/android/app/release.jks"
           printf 'storeFile=%s\n' "$GITHUB_WORKSPACE/android/app/release.jks" >> "$CI_CONFIG_DIR/keystore.properties"
-          # iOS: DEVELOPMENT_TEAM + keychain password consumed by build-release-artifacts.sh
-          printf 'DEVELOPMENT_TEAM=%s\n' "$IOS_DEVELOPMENT_TEAM" > "$CI_CONFIG_DIR/signing.env"
-          printf '%s' "$IOS_KEYCHAIN_PASSWORD" > "$CI_CONFIG_DIR/keychain.pw"
-
-      - name: Create build keychain + import iOS signing identity
-        env:
-          IOS_CERT_P12_B64: ${{ secrets.IOS_CERT_P12_B64 }}
-          IOS_CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
-          IOS_PROVISIONING_PROFILE_B64: ${{ secrets.IOS_PROVISIONING_PROFILE_B64 }}
-          IOS_KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
-        run: |
-          set -euo pipefail
-          KC="$HOME/Library/Keychains/build.keychain-db"
-          security create-keychain -p "$IOS_KEYCHAIN_PASSWORD" "$KC"
-          security set-keychain-settings -lut 21600 "$KC"       # no auto-lock mid-build
-          security unlock-keychain -p "$IOS_KEYCHAIN_PASSWORD" "$KC"
-          echo "$IOS_CERT_P12_B64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$IOS_CERT_PASSWORD" -T /usr/bin/codesign
-          # allow codesign to use the key without an interactive prompt
-          security set-key-partition-list -S apple-tool:,apple: -k "$IOS_KEYCHAIN_PASSWORD" "$KC" >/dev/null
-          security list-keychains -d user -s "$KC" "$HOME/Library/Keychains/login.keychain-db"
-          # install the provisioning profile so manual signing can resolve it
-          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          echo "$IOS_PROVISIONING_PROFILE_B64" | base64 --decode \
-            > "$HOME/Library/MobileDevice/Provisioning Profiles/runemobile.mobileprovision"
-          rm -f "$RUNNER_TEMP/cert.p12"
+          # iOS needs NO signing material here — IOS_ADHOC=1 ad-hoc-signs, and AltStore/SideStore re-signs the
+          # IPA on-device at install (the only supported way to run it).
 
       - name: Fetch the iOS JRE build dependency
         env:
@@ -126,7 +98,7 @@ jobs:
           gh release download ios-jre-dep --repo "$GITHUB_REPOSITORY" --pattern 'jre.tar.gz' --output "$RUNNER_TEMP/jre.tar.gz"
           tar xzf "$RUNNER_TEMP/jre.tar.gz" -C "$CI_CONFIG_DIR/ios-jre" --strip-components=1
 
-      - name: Build signed APK + IPA
+      - name: Build release APK + ad-hoc IPA
         run: |
           export GIT_SHA="$(git rev-parse --short "${GIT_SHA}")"
           tools/ci/build-release-artifacts.sh

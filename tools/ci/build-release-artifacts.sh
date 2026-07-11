@@ -115,7 +115,11 @@ if wants ios; then
 	have xcodegen  || die "xcodegen not found (brew install xcodegen)"
 	have xcodebuild || die "xcodebuild not found (install Xcode)"
 	[ -f "$CI_CONFIG_DIR/signing.env" ] && . "$CI_CONFIG_DIR/signing.env" || { [ -f ios/dev-tools/signing.env ] && . ios/dev-tools/signing.env; }
-	[ -n "${DEVELOPMENT_TEAM:-}" ] || die "DEVELOPMENT_TEAM unset — add it to $CI_CONFIG_DIR/signing.env"
+	# IOS_ADHOC=1 (the hosted pipeline) ad-hoc-signs instead of team-signing: the IPA is re-signed on-device by
+	# AltStore/SideStore at install, so CI needs no Apple account/cert/team — it only emits a valid bundle.
+	if [ "${IOS_ADHOC:-0}" != 1 ]; then
+		[ -n "${DEVELOPMENT_TEAM:-}" ] || die "DEVELOPMENT_TEAM unset — add it to $CI_CONFIG_DIR/signing.env"
+	fi
 
 	APPDIR="ios/app"
 	# 0) The embedded JRE (ios/dev-tools/jre) is verified + patched local state (patch-jre-txm.sh) — NOT
@@ -171,9 +175,17 @@ if wants ios; then
 	# CFBundleVersion floors to 1: a semver build has BUILD_NUMBER=0, but 0 reads as a build-number regression
 	# vs any prior release (and `${BUILD_NUMBER:-1}` yields 0 since 0 is set, not empty). Rolling builds keep run #.
 	IOS_BUILD="$BUILD_NUMBER"; [ "$IOS_BUILD" -gt 0 ] 2>/dev/null || IOS_BUILD=1
-	log "xcodebuild RuneMobile (Release, generic/iOS, signed)"
+	if [ "${IOS_ADHOC:-0}" = 1 ]; then
+		# Ad-hoc sign ("-"): no Apple cert/keychain/team needed; entitlements still embed into the bundle for
+		# SideStore to carry over when it re-signs on-device.
+		log "xcodebuild RuneMobile (Release, generic/iOS, ad-hoc — SideStore re-signs on install)"
+		IOS_SIGN_ARGS=(CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual CODE_SIGNING_REQUIRED=NO PROVISIONING_PROFILE_SPECIFIER= DEVELOPMENT_TEAM=)
+	else
+		log "xcodebuild RuneMobile (Release, generic/iOS, signed)"
+		IOS_SIGN_ARGS=(-allowProvisioningUpdates)
+	fi
 	xcodebuild -project "$APPDIR/RuneMobile.xcodeproj" -scheme RuneMobile -configuration Release \
-		-destination 'generic/platform=iOS' -derivedDataPath "$DD" -allowProvisioningUpdates \
+		-destination 'generic/platform=iOS' -derivedDataPath "$DD" "${IOS_SIGN_ARGS[@]}" \
 		MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$IOS_BUILD" build || die "xcodebuild failed"
 	APP="$DD/Build/Products/Release-iphoneos/RuneMobile.app"
 	[ -d "$APP" ] || die "no .app produced at $APP"

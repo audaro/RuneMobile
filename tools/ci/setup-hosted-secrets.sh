@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 #
-# ONE-TIME setup: copy your local signing material + the iOS JRE into GitHub, so releases build fully hosted.
+# ONE-TIME setup: copy your Android signing key + the iOS JRE into GitHub, so releases build fully hosted.
 #
 #   Run this ONCE. After it finishes, every release happens on GitHub with your computer completely out of the
-#   loop — click Merge, GitHub rebuilds + signs + publishes both apps. Re-run only if a key CHANGES (e.g. your
-#   Apple certificate expires, ~once a year), and then only the changed secret matters.
+#   loop — click Merge, GitHub rebuilds both apps and publishes them. Re-run only if the Android key changes.
+#
+# Only Android needs a real signing key (the APK installs directly). The iOS IPA is ad-hoc-signed in CI and
+# re-signed on-device by AltStore/SideStore at install, so there is NO Apple cert, profile, or team to upload.
 #
 # What it does (nothing is printed to screen or written to the repo):
-#   • reads the Android keystore + iOS team from your local ~/.runemobile-ci
-#   • prompts for the two things it can't know: your iOS signing .p12 and your .mobileprovision
-#   • generates a fresh keychain password
-#   • uploads all 7 secrets to the repo via `gh secret set`
+#   • reads the Android keystore from your local ~/.runemobile-ci and uploads it as 2 secrets
 #   • uploads the ~166 MB iOS JRE as the `ios-jre-dep` release asset the workflow fetches
 #
 # Requirements: gh CLI logged in with admin on the repo (`gh auth login`), run from the repo root on your Mac.
@@ -53,43 +52,11 @@ base64 < "$JKS" | set_secret ANDROID_KEYSTORE_B64
 grep -v '^[[:space:]]*storeFile[[:space:]]*=' "$KP" | set_secret ANDROID_KEYSTORE_PROPERTIES
 echo
 
-# ── 2. iOS team id ────────────────────────────────────────────────────────────────────────────────────────
-say "iOS Team ID"
-SENV="$CI_CONFIG_DIR/signing.env"
-[ -f "$SENV" ] || SENV="ios/dev-tools/signing.env"
-[ -f "$SENV" ] || die "no signing.env with DEVELOPMENT_TEAM (looked in $CI_CONFIG_DIR and ios/dev-tools)"
-TEAM="$(sed -n 's/^[[:space:]]*\(export[[:space:]]*\)\{0,1\}DEVELOPMENT_TEAM[[:space:]]*=[[:space:]]*//p' "$SENV" | tr -d '"'"'"' ' | head -1)"
-[ -n "$TEAM" ] || die "DEVELOPMENT_TEAM not set in $SENV"
-printf '%s' "$TEAM" | set_secret IOS_DEVELOPMENT_TEAM
-echo
+# NOTE: iOS needs NO signing material here. The IPA is ad-hoc-signed in CI and re-signed on-device by
+# AltStore/SideStore at install, so there's no Apple cert, profile, team, or keychain to upload — only the
+# Android release key (above) and the iOS JRE build input (below).
 
-# ── 3. keychain password (freshly generated — never needs to match anything) ─────────────────────────────
-say "Keychain password (generated)"
-openssl rand -base64 24 | tr -d '\n' | set_secret IOS_KEYCHAIN_PASSWORD
-echo
-
-# ── 4. iOS signing certificate (.p12) ─────────────────────────────────────────────────────────────────────
-say "iOS signing certificate (.p12)"
-echo "  If you don't have a .p12 file: open Keychain Access → find your 'Apple Development/Distribution'"
-echo "  identity → right-click → Export → save as a .p12 with a password, then give its path below."
-read -r -p "  Path to your .p12: " P12
-P12="${P12/#\~/$HOME}"
-[ -f "$P12" ] || die "no file at $P12"
-read -r -s -p "  Password you set on that .p12: " P12PW; echo
-base64 < "$P12" | set_secret IOS_CERT_P12_B64
-printf '%s' "$P12PW" | set_secret IOS_CERT_PASSWORD
-echo
-
-# ── 5. provisioning profile (.mobileprovision) ────────────────────────────────────────────────────────────
-say "Provisioning profile (.mobileprovision)"
-echo "  Downloaded from the Apple Developer portal, or in ~/Library/MobileDevice/Provisioning Profiles/."
-read -r -p "  Path to your .mobileprovision: " PROFILE
-PROFILE="${PROFILE/#\~/$HOME}"
-[ -f "$PROFILE" ] || die "no file at $PROFILE"
-base64 < "$PROFILE" | set_secret IOS_PROVISIONING_PROFILE_B64
-echo
-
-# ── 6. iOS JRE → release asset ────────────────────────────────────────────────────────────────────────────
+# ── 2. iOS JRE → release asset ────────────────────────────────────────────────────────────────────────────
 say "iOS JRE build dependency (~166 MB)"
 JRE_SRC="$CI_CONFIG_DIR/ios-jre"
 [ -f "$JRE_SRC/lib/libjvm.dylib" ] || JRE_SRC="ios/dev-tools/jre"
