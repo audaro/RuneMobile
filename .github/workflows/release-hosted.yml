@@ -1,0 +1,130 @@
+# RuneMobile rolling release — FULLY HOSTED on GitHub (no self-hosted Mac, no private repo).
+#
+# Builds a signed APK + IPA on a GitHub-hosted macOS runner and publishes them as a rolling prerelease on
+# THIS repo. It reuses the existing, tested build/publish scripts (tools/ci/*.sh) verbatim — the only new work
+# is provisioning their four inputs (Android keystore, iOS signing identity, keychain, iOS JRE) from GitHub
+# secrets + a release asset instead of the developer Mac's ~/.runemobile-ci.
+#
+# ── STATUS: DRAFT ────────────────────────────────────────────────────────────────────────────────────────
+# Manual-trigger ONLY (workflow_dispatch) until proven, so it can't fail noisily before the secrets exist.
+# Once a manual run produces a real signed APK + IPA, flip the trigger to `push: branches: [master]` and this
+# becomes the "every merge to master rebuilds + releases both apps" pipeline.
+#
+# ── REQUIRED SETUP (one-time, done by the repo owner) ────────────────────────────────────────────────────
+# Repository secrets (Settings → Secrets and variables → Actions):
+#   ANDROID_KEYSTORE_B64        base64 of the release .jks
+#   ANDROID_KEYSTORE_PROPERTIES full keystore.properties, with storeFile=android/app/release.jks (relative)
+#   IOS_CERT_P12_B64            base64 of the Apple signing identity .p12 (cert + private key)
+#   IOS_CERT_PASSWORD           password used when exporting the .p12
+#   IOS_PROVISIONING_PROFILE_B64 base64 of the .mobileprovision (manual signing)
+#   IOS_KEYCHAIN_PASSWORD       any strong string — the ephemeral runner keychain password
+#   IOS_DEVELOPMENT_TEAM        the 10-char Apple Team ID
+# Release asset (the iOS JRE, ~166 MB, not URL-reproducible):
+#   gh release create ios-jre-dep --repo <owner>/<repo> -t "iOS JRE build dependency" -n "Build input; not a release." \
+#     <(cd ios/dev-tools && tar czf - jre)   # or attach ios-jre.tar.gz built from ~/.runemobile-ci/ios-jre
+#   (Publishing an OpenJDK build is fine — GPLv2+CE, and it already ships inside every IPA.)
+
+name: release-hosted
+
+on:
+  workflow_dispatch:
+  # TODO(flip once proven): uncomment to make every merge to master rebuild + release both apps.
+  # push:
+  #   branches: [master]
+
+concurrency:
+  group: release-hosted
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    # Runs only on the canonical public repo (id 1296635776) — inert in forks so a fork's dispatch can never
+    # spend this repo's secrets. Fork PRs never receive secrets regardless; this is defense in depth.
+    if: github.repository_id == '1296635776'
+    runs-on: macos-14
+    permissions:
+      contents: write   # publish the rolling release to THIS repo (no PUBLISH_TOKEN needed anymore)
+    env:
+      BUILD_NUMBER: ${{ github.run_number }}
+      GIT_SHA: ${{ github.sha }}
+      REQUIRE_RELEASE_KEY: "1"           # refuse to publish anything not signed by the real release key
+      CI_CONFIG_DIR: ${{ runner.temp }}/runemobile-ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: 21
+      # setup-java exports JAVA_HOME for the whole job; the build scripts read $JAVA_HOME.
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Contract pre-flight (fast, non-bypassable)
+        run: ./android/dev-tools/ci/release-gate.sh --contract-only
+
+      - name: Materialize signing/config from secrets  (nothing here is echoed)
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PROPERTIES: ${{ secrets.ANDROID_KEYSTORE_PROPERTIES }}
+          IOS_DEVELOPMENT_TEAM: ${{ secrets.IOS_DEVELOPMENT_TEAM }}
+          IOS_KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$CI_CONFIG_DIR"
+          # Android: keystore.properties references storeFile=android/app/release.jks (relative to repo root)
+          printf '%s' "$ANDROID_KEYSTORE_PROPERTIES" > "$CI_CONFIG_DIR/keystore.properties"
+          echo "$ANDROID_KEYSTORE_B64" | base64 --decode > android/app/release.jks
+          # iOS: DEVELOPMENT_TEAM + keychain password consumed by build-release-artifacts.sh
+          printf 'DEVELOPMENT_TEAM=%s\n' "$IOS_DEVELOPMENT_TEAM" > "$CI_CONFIG_DIR/signing.env"
+          printf '%s' "$IOS_KEYCHAIN_PASSWORD" > "$CI_CONFIG_DIR/keychain.pw"
+
+      - name: Create build keychain + import iOS signing identity
+        env:
+          IOS_CERT_P12_B64: ${{ secrets.IOS_CERT_P12_B64 }}
+          IOS_CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
+          IOS_PROVISIONING_PROFILE_B64: ${{ secrets.IOS_PROVISIONING_PROFILE_B64 }}
+          IOS_KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KC="$HOME/Library/Keychains/build.keychain-db"
+          security create-keychain -p "$IOS_KEYCHAIN_PASSWORD" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"       # no auto-lock mid-build
+          security unlock-keychain -p "$IOS_KEYCHAIN_PASSWORD" "$KC"
+          echo "$IOS_CERT_P12_B64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$IOS_CERT_PASSWORD" -T /usr/bin/codesign
+          # allow codesign to use the key without an interactive prompt
+          security set-key-partition-list -S apple-tool:,apple: -k "$IOS_KEYCHAIN_PASSWORD" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" "$HOME/Library/Keychains/login.keychain-db"
+          # install the provisioning profile so manual signing can resolve it
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo "$IOS_PROVISIONING_PROFILE_B64" | base64 --decode \
+            > "$HOME/Library/MobileDevice/Provisioning Profiles/runemobile.mobileprovision"
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Fetch the iOS JRE build dependency
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$CI_CONFIG_DIR/ios-jre"
+          gh release download ios-jre-dep --repo "$GITHUB_REPOSITORY" --pattern 'jre.tar.gz' --output "$RUNNER_TEMP/jre.tar.gz"
+          tar xzf "$RUNNER_TEMP/jre.tar.gz" -C "$CI_CONFIG_DIR/ios-jre" --strip-components=1
+
+      - name: Build signed APK + IPA
+        run: |
+          export GIT_SHA="$(git rev-parse --short "${GIT_SHA}")"
+          tools/ci/build-release-artifacts.sh
+
+      - name: Publish rolling prerelease to this repo
+        env:
+          PUBLISH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # same-repo publish — the built-in token suffices
+        run: |
+          export GIT_SHA="$(git rev-parse --short HEAD)"
+          tools/ci/publish-rolling-release.sh
