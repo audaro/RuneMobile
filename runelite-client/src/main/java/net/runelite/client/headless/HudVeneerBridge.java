@@ -772,6 +772,15 @@ public final class HudVeneerBridge
 				// tap targets over them. Laid here as well as in tick(): a chatbox rebuild in the client tick (every
 				// new message) re-runs the desktop layout, and this is the last word before that frame rasters.
 				layOfficialChat(c);
+				// Centre a dialogue (fitDialogueArea) before raster too: it mounts in the client tick, and tick()
+				// would centre it only after its first frame had drawn off to the right. Keyed on the mount itself,
+				// not dialogueOpen, which is a frame late both ways: late on the first page, and still set on the
+				// frame after the close, where centring would shift the returning chat lines 29 px left.
+				final HashTable<WidgetNode> mounts = c.getComponentTable();
+				if (mounts != null && mounts.get(InterfaceID.Chatbox.CHATMODAL) != null)
+				{
+					fitDialogueArea(c);
+				}
 				// Path B (final word before raster): SHOW the chat brown box while a dialogue is open (the dialogue
 				// draws onto it -> opaque dialogue), HIDE it otherwise (transparent message veneer). Must mirror tick()
 				// or this re-hide would blank the dialogue box every frame. CONTROLS backgrounds stay hidden.
@@ -1104,6 +1113,7 @@ public final class HudVeneerBridge
 				{
 					setHidden(c, InterfaceID.Chatbox.CHATAREA, false);
 					setHidden(c, InterfaceID.Chatbox.INPUT_CLICKAREA, true);
+					fitDialogueArea(c);
 				}
 				else
 				{
@@ -4167,6 +4177,58 @@ public final class HudVeneerBridge
 		catch (RuntimeException ignore)
 		{
 			BridgeFaults.note("HudVeneerBridge.sizeChatArea", ignore);
+		}
+	}
+
+	/**
+	 * Centre the chat area on the visible chat while a dialogue is on it. Every chatbox dialogue is laid out for the
+	 * desktop's 519-px chat area: CHATMODAL fills the area, the conversation pages centre a 479-px box in it, and
+	 * the options menu sits at a fixed x of 20. The official layout's container is {@link #chatWidth()} wide (461)
+	 * and clips the rest, so with the area at x=0 every dialogue lost its right 38 px (the player's head, the end
+	 * of a long line or option) beside 20 px of empty box on the left. Script 113 puts the area back at (0,0),
+	 * 519 wide, whenever the chatbox's sub-interface changes, i.e. on every page, and sizeChatArea, which lays it
+	 * otherwise, is skipped under a dialogue. So the area keeps the width the dialogues expect and is shifted to
+	 * centre on what can be seen; the box overhangs by 9 px a side, its own margin. The height stays the game's.
+	 * Client thread.
+	 */
+	private static void fitDialogueArea(Client c)
+	{
+		try
+		{
+			final Widget area = c.getWidget(InterfaceID.Chatbox.CHATAREA);
+			if (area == null)
+			{
+				return;
+			}
+			final boolean resized = area.getWidthMode() != WidgetSizeMode.ABSOLUTE
+				|| area.getOriginalWidth() != CHAT_DEFAULT_W;
+			if (resized)
+			{
+				area.setWidthMode(WidgetSizeMode.ABSOLUTE);
+				area.setOriginalWidth(CHAT_DEFAULT_W);
+			}
+			// The shift is left, and the engine ignores a negative forced position (pinned at -29, the area stayed at
+			// 0 and the pin re-fired every frame). So it goes through the original x, with the forced x that
+			// CHATAREA_PIN holds at 0 cleared; the forced y stays. sizeChatArea's pin forces (0, y) again once the
+			// dialogue closes, since the area changes size then.
+			final int x = (chatWidth() - CHAT_DEFAULT_W) / 2;
+			if (resized || area.getXPositionMode() != WidgetPositionMode.ABSOLUTE_LEFT || area.getOriginalX() != x
+				|| area.getRelativeX() != x)
+			{
+				area.setXPositionMode(WidgetPositionMode.ABSOLUTE_LEFT);
+				area.setOriginalX(x);
+				area.setForcedPosition(-1, OFFICIAL_ROW_BOTTOM);
+				area.revalidate();
+				if (resized)
+				{
+					// revalidate() lays the area alone; a new width has to reach the box, CHATMODAL and the dialogue.
+					area.revalidateScroll();
+				}
+			}
+		}
+		catch (RuntimeException ignore)
+		{
+			BridgeFaults.note("HudVeneerBridge.fitDialogueArea", ignore);
 		}
 	}
 
