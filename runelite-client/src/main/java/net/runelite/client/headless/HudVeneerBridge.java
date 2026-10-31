@@ -1080,26 +1080,39 @@ public final class HudVeneerBridge
 				setHidden(c, InterfaceID.Chatbox.CHAT_BACKGROUND, !dlgOpen && !promptOpen);
 				hide(c, InterfaceID.Chatbox.CONTROLS_BACKGROUND);
 				hide(c, InterfaceID.Chatbox.CONTROLS_BACKGROUND_GRAPHIC);
-				// Collapse (tap the active tab) hides only the message CONTENT, not the container, so the lines are
-				// PRESERVED (no teardown) and reopening is instant + populated instead of an empty box that needs a
-				// second tap to rebuild. sizeChatArea force-shows these every frame, so re-hide them here when collapsed.
-				// Hide the message area + input + scrollbar while COLLAPSED or while a DIALOGUE is open: the dialogue
-				// replaces the chat messages (desktop behaviour), and leaving them shown lets live chat lines bleed
-				// over the opaque dialogue box. The dialogue groups are separate top-level interfaces, so hiding
-				// CHATAREA hides only the message lines, not the dialogue.
-				// Hide the message area while COLLAPSED or while a DIALOGUE is open. Hiding the CHATAREA parent hides
-				// its children (CHATDISPLAY/MES_LAYER/INPUT) too — and since sizeChatArea (which force-shows + resizes
-				// them) is SKIPPED during a dialogue, nothing re-shows them, so this alone stops the chat-line bleed.
-				// Do NOT separately hide+show the child layers: that hide/show cycle made the engine re-lay them on the
-				// next BUILD_CHATBOX and clipped/dropped the bottom input line.
+				// Collapse (tap the active tab) and put away hide only the message CONTENT, not the container, so the
+				// lines are PRESERVED (no teardown) and reopening is instant + populated instead of an empty box that
+				// needs a second tap to rebuild. sizeChatArea force-shows these every frame, so re-hide them here.
+				// Hiding the CHATAREA parent hides its children (CHATDISPLAY/MES_LAYER/INPUT) too. Do NOT separately
+				// hide+show the child layers: that hide/show cycle made the engine re-lay them on the next
+				// BUILD_CHATBOX and clipped/dropped the bottom input line.
 				// ... but NOT while a prompt is open. The prompt is drawn INTO the chat area, so hiding its parent
-				// hides the prompt — the same mistake as the forefront-window rule above, one level down. A
+				// hides the prompt - the same mistake as the forefront-window rule above, one level down. A
 				// collapsed chat yields to it too: the player just asked the game for this input.
-				final boolean hideMsgArea = (chatClosed || dlgOpen) && !promptOpen;
-				setHidden(c, InterfaceID.Chatbox.CHATAREA, hideMsgArea);
-				setHidden(c, InterfaceID.Chatbox.INPUT, hideMsgArea);
-				setHidden(c, InterfaceID.Chatbox.INPUT_CLICKAREA, hideMsgArea);
-				setHidden(c, InterfaceID.Chatbox.CHATSCROLLBAR, hideMsgArea);
+				//
+				// A DIALOGUE is drawn into the chat area as well: the game opens it on CHATMODAL (162:568), which
+				// hangs off MES_LAYER_HIDE under CHATAREA, so hiding CHATAREA hides the dialogue. The game keeps it
+				// shown by itself. The chatbox's sub-change script (80 -> 113 -> 923) un-hides CHATAREA whenever a
+				// dialogue is mounted, and 908 hides the message lines (CHATDISPLAY) under it, so no chat line bleeds
+				// over the box while sizeChatArea is skipped. Those scripts run once, when a dialogue opens or another
+				// replaces it. Hiding CHATAREA here every frame left each one on screen for that one frame and then
+				// blank, still answering taps (issue #5). So a dialogue gets the area shown and the lines left to the engine.
+				// INPUT_CLICKAREA is the exception: no game script shows or hides it (it loads hidden; only the
+				// branch below shows it), so it is hidden here, or the chat's input click zone would sit across the
+				// bottom of the dialogue, where its "Click here to continue" is.
+				if (dlgOpen)
+				{
+					setHidden(c, InterfaceID.Chatbox.CHATAREA, false);
+					setHidden(c, InterfaceID.Chatbox.INPUT_CLICKAREA, true);
+				}
+				else
+				{
+					final boolean hideMsgArea = chatClosed && !promptOpen;
+					setHidden(c, InterfaceID.Chatbox.CHATAREA, hideMsgArea);
+					setHidden(c, InterfaceID.Chatbox.INPUT, hideMsgArea);
+					setHidden(c, InterfaceID.Chatbox.INPUT_CLICKAREA, hideMsgArea);
+					setHidden(c, InterfaceID.Chatbox.CHATSCROLLBAR, hideMsgArea);
+				}
 				buildChatSnapshot(c);
 				if (CHAT_LINES)
 				{
@@ -3699,8 +3712,8 @@ public final class HudVeneerBridge
 		final int sub = chatboxSubInterface(c);
 		noteEngineOwnedDialogue(sub);
 		// NOTE: a message-layer prompt (GE/bank search, "Enter amount") is deliberately NOT a dialogue here.
-		// This flag means "a separate interface has replaced the chat lines", and the hiding it drives — of
-		// CHATAREA, the parent of MES_LAYER — would hide the prompt itself, which lives INSIDE the chat area.
+		// This flag means "a separate interface has replaced the chat lines", and the tick then stops laying out
+		// the chat area (sizeChatArea), which a prompt needs: it lives INSIDE the chat area, laid from its top.
 		// The prompt is tracked separately as chatPromptOpen; see the tick.
 		if (sub >= 0)
 		{
