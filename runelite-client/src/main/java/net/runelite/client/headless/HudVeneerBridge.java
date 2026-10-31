@@ -250,6 +250,10 @@ public final class HudVeneerBridge
 	// RELEASE the veneer (chat back to natural+opaque) and the native side hides its chat veneer (reads this in
 	// the snapshot as "dialogueActive"), giving the desktop-identical opaque dialogue box.
 	private static volatile boolean dialogueOpen;
+	// The dialogue the last tick saw was mounted on CHATMODAL, where every chatbox dialogue but a few named boxes
+	// goes. preRender reads it to tell a dialogue that just closed (flag still set, mount gone) from one mounted
+	// elsewhere. Client thread only.
+	private static boolean dialogueOnModal;
 	// The engine's chatbox message layer is taking typed input (GE item search, bank search, "Enter amount").
 	// Separate from dialogueOpen because it is the opposite kind of thing: a dialogue REPLACES the chat area,
 	// a prompt lives INSIDE it. Published so the native shell routes a tap there as a precise click.
@@ -750,6 +754,12 @@ public final class HudVeneerBridge
 			// Pin the chatbox TRANSPARENT as the final word before raster too (see tick/keepChatboxTransparent): the
 			// engine then draws the message lines with the over-scene colour set (white names + shadow), the official
 			// mobile look. Only while the veneer is relocating the chat — otherwise leave the chatbox's own setting.
+			// Whether a dialogue is on the chat as of THIS frame. dialogueOpen comes from tick(), which runs after the
+			// draw, so on its own it is a frame late both ways: the first frame of a dialogue drew bare text over the
+			// world (transparent, no box), and the first frame after one closed put the box behind the returning chat
+			// lines. The CHATMODAL mount is read directly; dialogueOpen still answers for a box mounted elsewhere.
+			final boolean modalNow = chatModalMounted(c);
+			final boolean dialogueNow = modalNow || (dialogueOpen && !dialogueOnModal);
 			if (chatX >= 0)
 			{
 				// Path B: opaque (0) while a dialogue is open so the engine paints its own dialogue parchment + head;
@@ -757,7 +767,7 @@ public final class HudVeneerBridge
 				// per-dialogue flip — forcing transparent here unconditionally would override the opaque dialogue.
 				// A message-layer prompt takes the opaque box for the same reason tick() un-hides CHAT_BACKGROUND
 				// for it: transparent here would paint that box away again on the very next frame.
-				if (dialogueOpen || chatPromptOpen)
+				if (dialogueNow || chatPromptOpen)
 				{
 					setChatboxTransparency(c, 0);
 				}
@@ -773,11 +783,9 @@ public final class HudVeneerBridge
 				// new message) re-runs the desktop layout, and this is the last word before that frame rasters.
 				layOfficialChat(c);
 				// Centre a dialogue (fitDialogueArea) before raster too: it mounts in the client tick, and tick()
-				// would centre it only after its first frame had drawn off to the right. Keyed on the mount itself,
-				// not dialogueOpen, which is a frame late both ways: late on the first page, and still set on the
-				// frame after the close, where centring would shift the returning chat lines 29 px left.
-				final HashTable<WidgetNode> mounts = c.getComponentTable();
-				if (mounts != null && mounts.get(InterfaceID.Chatbox.CHATMODAL) != null)
+				// would centre it only after its first frame had drawn off to the right. On the mount alone: after a
+				// close, centring would shift the returning chat lines 29 px left.
+				if (modalNow)
 				{
 					fitDialogueArea(c);
 				}
@@ -788,7 +796,7 @@ public final class HudVeneerBridge
 				// the box for a prompt and this ran after it with the dialogue test alone, so the last write before
 				// raster hid it again every frame: the engine's search grid drew its icons over the bare scene with
 				// nothing behind them. Transparency 0 cannot help a background that is hidden.
-				setHidden(c, InterfaceID.Chatbox.CHAT_BACKGROUND, !dialogueOpen && !chatPromptOpen);
+				setHidden(c, InterfaceID.Chatbox.CHAT_BACKGROUND, !dialogueNow && !chatPromptOpen);
 				hide(c, InterfaceID.Chatbox.CONTROLS_BACKGROUND);
 				hide(c, InterfaceID.Chatbox.CONTROLS_BACKGROUND_GRAPHIC);
 			}
@@ -913,6 +921,7 @@ public final class HudVeneerBridge
 			final boolean mapOpenNow = isWorldMapOpen(c);
 			final boolean dlgOpen = isDialogueOpen(c);
 			dialogueOpen = dlgOpen;   // published in buildChatSnapshot so the native side hides its chat veneer
+			dialogueOnModal = dlgOpen && chatModalMounted(c);
 			// A prompt only counts when no dialogue owns the chat area: make-X and friends are named dialogues
 			// that may also drive the message layer, and they keep their existing (parchment) handling.
 			final boolean promptOpen = !dlgOpen && isChatPromptOpen(c);
@@ -4178,6 +4187,14 @@ public final class HudVeneerBridge
 		{
 			BridgeFaults.note("HudVeneerBridge.sizeChatArea", ignore);
 		}
+	}
+
+	/** A dialogue is mounted on CHATMODAL right now (the component table is keyed by the component an interface
+	 *  is opened on). Client thread. */
+	private static boolean chatModalMounted(Client c)
+	{
+		final HashTable<WidgetNode> mounts = c.getComponentTable();
+		return mounts != null && mounts.get(InterfaceID.Chatbox.CHATMODAL) != null;
 	}
 
 	/**
