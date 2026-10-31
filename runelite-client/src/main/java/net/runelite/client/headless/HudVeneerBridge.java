@@ -748,18 +748,18 @@ public final class HudVeneerBridge
 			// re-showed during the client tick would otherwise get one fully painted frame on top of the map
 			// — the same one-frame flash this seam exists to close for the stone rows and the chat tabs.
 			setMapHudHidden(c, preEoc, isWorldMapOpen(c));
-			// Same gates as the chat block in tick(): only while the chat veneer is active and the world map
-			// doesn't own the screen. (A dialogue uses the normal relocate path and stays at the top, so this
-			// re-assert applies during dialogues too.)
-			// Pin the chatbox TRANSPARENT as the final word before raster too (see tick/keepChatboxTransparent): the
-			// engine then draws the message lines with the over-scene colour set (white names + shadow), the official
-			// mobile look. Only while the veneer is relocating the chat — otherwise leave the chatbox's own setting.
 			// Whether a dialogue is on the chat as of THIS frame. dialogueOpen comes from tick(), which runs after the
 			// draw, so on its own it is a frame late both ways: the first frame of a dialogue drew bare text over the
 			// world (transparent, no box), and the first frame after one closed put the box behind the returning chat
 			// lines. The CHATMODAL mount is read directly; dialogueOpen still answers for a box mounted elsewhere.
 			final boolean modalNow = chatModalMounted(c);
 			final boolean dialogueNow = modalNow || (dialogueOpen && !dialogueOnModal);
+			// Same gates as the chat block in tick(): only while the chat veneer is active and the world map
+			// doesn't own the screen. (A dialogue uses the normal relocate path and stays at the top, so this
+			// re-assert applies during dialogues too.)
+			// Pin the chatbox TRANSPARENT as the final word before raster too (see tick/keepChatboxTransparent): the
+			// engine then draws the message lines with the over-scene colour set (white names + shadow), the official
+			// mobile look. Only while the veneer is relocating the chat — otherwise leave the chatbox's own setting.
 			if (chatX >= 0)
 			{
 				// Path B: opaque (0) while a dialogue is open so the engine paints its own dialogue parchment + head;
