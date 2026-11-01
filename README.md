@@ -357,8 +357,10 @@ installed.
    **Files → On My iPhone → StikDebug → `scripts/`**, or use StikDebug's in-app
    **"add / import script"** button.
 2. In **StikDebug**, open the app list, select **RuneMobile**, and **assign**
-   `runelite-jit.js` as its script. StikDebug stores this per-app mapping, so you only
-   do it once.
+   `runelite-jit.js` as its script. StikDebug stores this per-app mapping, so you
+   normally do it once. After updating iOS, StikDebug or RuneMobile, check it still
+   holds: if the game closes right after **Tap to Play**, reset and re-assign it (see
+   [Troubleshooting](#troubleshooting)).
 3. Ensure **LocalDevVPN** is connected before attaching.
 
 ### What a healthy attach looks like
@@ -432,6 +434,7 @@ When asking for help, **never paste `tokens.json`, an `access_token`, a
 | Symptom | Cause / fix |
 |---|---|
 | App won't launch / just waits | JIT not enabled. Turn on LocalDevVPN, attach StikDebug, then tap the **Tap to Play** button. |
+| **Tap to Play** works, then the app closes about half a second after "Starting up…" (often after updating iOS, StikDebug or RuneMobile) | StikDebug switched JIT on without running `runelite-jit.js`. In StikDebug's app list, long-press RuneMobile → **Reset Script**, then **Assign Script** → `runelite-jit.js`, and attach again. StikDebug's "Always Run Scripts" setting doesn't fix this: it never assigns a script. |
 | Attaches but crashes, no `[rl-jit]` log lines, or StikDebug won't list/select the script | Script not assigned, or the file is corrupted/malformed — delete it from `StikDebug/scripts/` and re-import a fresh `runelite-jit.js`, then re-assign it to RuneMobile. |
 | "Unable to install" in SideStore | SideStore's VPN must be on and you must be signed into your Apple ID. |
 | Can't enable Developer Mode | Set a device passcode first, then Settings → Privacy & Security. |

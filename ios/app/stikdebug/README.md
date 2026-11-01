@@ -120,6 +120,13 @@ Capture both logs. Useful signals:
   `xcrun devicectl device info processes --device <udid> | grep -i runemobile` — if RuneMobile is running
   and the spinner never resolves, the fault is on the StikDebug side, not ours.
 - **No `[rl-jit] attached` line** → the script wasn't assigned/run; re-check the assignment.
+- **"Ready to play", then the app dies about 0.5 s after Tap to Play** → the same cause seen from the app.
+  StikDebug attached and detached without the script (`vAttach` + `D`), so `CS_DEBUGGED` is set but nothing
+  answers the JVM's `brk #0x69` in `CodeCache::initialize`. StikDebug runs a script only when one is assigned
+  to the app's **exact bundle id** (a SideStore install is `dev.audaro.runemobile.<TEAMID>`). Its "Always Run
+  Scripts" setting only forces TXM mode, which every iPhone already gets on iOS 27 (and the 14,2 or newer
+  models on iOS 26). Fix: long-press RuneMobile in StikDebug's app list → **Reset Script**, then **Assign Script**.
+  First seen 2026-10-31 on an iPhone 15 right after an iOS update. That reset and re-assign fixed it.
 - **`_M alloc FAILED`** → RX allocation rejected (try a smaller `-XX:ReservedCodeCacheSize` than the 64m in
   the JVM options in `JVMLauncher.m`).
 - **`[rl-jit] forward pc=…`** → the stop wasn't a `brk #0x69` on any thread, so it went to the VM's own
