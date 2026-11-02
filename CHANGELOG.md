@@ -14,9 +14,33 @@ as "What's new".
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-01
+
+### Added
+- **iOS: the Play screen says when StikDebug ran the wrong script,** before you tap Play. Right after the attach
+  the app checks the script. If StikDebug attached without `runelite-jit.js` or ran a different one, Tap to Play
+  stays off and the screen says which, instead of the app closing half a second after you tap it. The fix is the
+  same either way: in StikDebug, long-press RuneMobile, Reset Script, then Assign Script and pick
+  `runelite-jit.js`. Your current copy of the script keeps working; there is nothing to re-import. If the app
+  still closes during start-up, the next launch says "The last start didn't finish" and how to fix it.
+
 ### Changed
 - **iOS:** the release IPA is built the same way as the rolling builds: ad-hoc sealed, with no developer
   provisioning profile inside. SideStore and AltStore re-sign it at install, as before.
+
+### Fixed
+- **NPC dialogues stay on screen.** A conversation showed for one frame and then vanished, though tapping still
+  answered it ([#5](https://github.com/audaro/runemobile/issues/5)).
+- **Dialogues fit the chat box.** Every page was cut off on the right: the speaker's head halved, and the end of a
+  long line or option missing.
+- **A dialogue's first and last frames draw the right chat box.** The first frame showed the text bare over the
+  world, and the first frame after it closed kept the box behind the chat.
+
+### Security
+- The release pipeline's signing key and its permission to edit releases moved out of the build job, so the
+  third-party tools a build runs can't reach them. The iOS runtime it downloads is checked against a pinned
+  checksum.
+- The headless login scripts in `ios/dev-tools/` no longer print the access token.
 
 ## [0.6.0] - 2026-10-28
 
@@ -374,7 +398,9 @@ OAuth + RuneLite-account sync, native HUD/chat/tab-grid veneers, plugin panel.
 - Release signing: a dedicated key via `keystore.properties` when present, else
   the debug key (see `keystore.properties.example`).
 
-[Unreleased]: https://github.com/audaro/runemobile/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/audaro/runemobile/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/audaro/runemobile/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/audaro/runemobile/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/audaro/runemobile/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/audaro/runemobile/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/audaro/runemobile/compare/v0.3.0...v0.3.1

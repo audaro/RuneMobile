@@ -127,7 +127,7 @@ targets:
         DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}   # set in ios/dev-tools/signing.env (gitignored) or your env
         # The version a plain build shows (the Simulator, /deploy, an Xcode run). Keep it equal to the semver in
         # android/app/build.gradle.kts; the release gate checks. Release builds and serve-ipa.sh pass their own.
-        MARKETING_VERSION: "0.6.0"
+        MARKETING_VERSION: "0.7.0"
         CURRENT_PROJECT_VERSION: "1"
         # Hello has no Obj-C/Swift dylib deps of its own; the JRE is dlopen'd at runtime.
         LD_RUNPATH_SEARCH_PATHS:
