@@ -20,10 +20,10 @@ object Redact {
             // Authorization: Bearer <token>
             Regex("(?i)\\b(bearer\\s+)[A-Za-z0-9._~+/=-]{8,}") to "$1<token>",
             // Query-string secrets in a logged URL (sign-in redirects carry one-time codes)
-            Regex("(?i)([?&][a-z_]*(?:code|token|state|session|key)[a-z_]*=)[^&\\s\"'#]+") to "$1<redacted>",
+            Regex("(?i)([?&][a-z_]*(?:code|token|state|session|key|secret|password)[a-z_]*=)[^&\\s\"'#]+") to "$1<redacted>",
             // key=value, key: value and "key":"value"
             Regex(
-                "(?i)\\b((?:access|refresh|id|auth)[_-]?token|token|password|passwd|secret|session[_-]?id|session|" +
+                "(?i)\\b((?:access|refresh|id|auth)[_-]?token|token|(?:[a-z]+[_-])?(?:password|passwd|secret)|session[_-]?id|session|" +
                     "authorization|api[_-]?key|character[_-]?id|account[_-]?id|display[_-]?name|user[_-]?name|" +
                     "jx_[a-z_]+)([\"']?\\s*[:=]\\s*[\"']?)([^\\s\"',;&}\\]]{4,})",
             ) to "$1$2<redacted>",

@@ -45,6 +45,10 @@
 > [jx] JX_* set: displayName=set characterId=set session=<redacted> access=set refresh=set
 < password: hunter22 apiKey=k-123456 sessionId=abcd1234
 > password: <redacted> apiKey=<redacted> sessionId=<redacted>
+< GET /oauth/token?client_secret=fakeclientval9&lang=en 200
+> GET /oauth/token?client_secret=<redacted>&lang=en 200
+< client_secret=fakeclientval9 db_password: fakepassval9
+> client_secret=<redacted> db_password: <redacted>
 
 # Emails and UUIDs
 < RuneLite account player.one+osrs@example.co.uk signed in
