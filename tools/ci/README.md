@@ -32,6 +32,7 @@ install for good, or rewrite other releases: the stable `v*` releases, the AltSt
 |------|------|
 | `tools/ci/build-release-artifacts.sh` | The build. Produces `dist/ci/RuneMobile-<ver>.{apk,ipa}` + `runelite-jit.js` + `manifest.env`. By default (`IOS_ADHOC=1`) it builds the IPA unsigned then ad-hoc-seals it (SideStore re-signs on install); `IOS_ADHOC=0` team-signs it, which embeds the developer's provisioning profile, so both publish scripts refuse that IPA. Runnable + testable locally. |
 | `tools/ci/publish-rolling-release.sh` | Publishes `dist/ci/` as a rolling prerelease on this repo. |
+| `tools/ci/check-ipa-clean.sh` | Refuses an IPA (or app folder) that still identifies the developer: a provisioning profile or `.xcent`, or a signing certificate left in a binary's signature space after a re-sign. The build runs it on the sealed app; both publish scripts run it on the IPA. |
 | `.github/workflows/release-hosted.yml` | **The live pipeline.** `push:[master]` (+ dispatch): `build` (contract pre-flight → fetch + verify the iOS JRE → build) → `sign` → `publish`. |
 | `.github/workflows/CI.yml` | Upstream RuneLite's full build/test (JDK 11) on every push + PR — the public green/red check that keeps this repo building like RuneLite. |
 | `.github/workflows/upstream-sync.yml` | Polls `runelite/runelite` every 6 h and **fails loudly** (emails the owner) when upstream is ahead — a notifier, never an auto-merge (see *Upstream watch*). |

@@ -220,10 +220,16 @@ if wants ios; then
 		ENTS="$APPDIR/RuneMobile/RuneMobile.entitlements"
 		[ -f "$ENTS" ] || die "entitlements file missing: $ENTS"
 		APPB="$WORK/Payload/RuneMobile.app"
+		# Every signature is REMOVED before the ad-hoc one goes on. `codesign --force` writes the new, smaller
+		# signature into the old one's space and leaves the rest of the old bytes, so a binary that arrived
+		# team-signed (an incremental Xcode build can reuse a JRE copy a device build signed) kept the old
+		# certificate, with the team ID and Apple ID email, inside the IPA. The first 0.7.1 IPA shipped 40 such JRE
+		# binaries. --remove-signature cuts those bytes off, and is a no-op on an unsigned file.
 		# 1) Embedded frameworks/dylibs (e.g. ANGLE) — CODE_SIGNING_ALLOWED=NO left these unsigned; --deep would
 		#    have caught them, but sign explicitly so nothing depends on --deep's discovery rules.
 		if [ -d "$APPB/Frameworks" ]; then
 			while IFS= read -r -d '' fw; do
+				codesign --remove-signature "$fw" || die "remove signature failed: $fw"
 				codesign --force --sign - --timestamp=none "$fw" || die "ad-hoc sign framework failed: $fw"
 			done < <(find "$APPB/Frameworks" -maxdepth 1 \( -name '*.framework' -o -name '*.dylib' \) -print0)
 		fi
@@ -232,13 +238,17 @@ if wants ios; then
 		while IFS= read -r -d '' f; do
 			case "$f" in "$APPB/RuneMobile"|"$APPB/Frameworks/"*) continue;; esac
 			file -b "$f" | grep -q "Mach-O" || continue
+			codesign --remove-signature "$f" || die "remove signature failed: $f"
 			codesign --force --sign - --timestamp=none "$f" || die "ad-hoc sign nested failed: $f"
 		done < <(find "$APPB" -type f \( -name '*.dylib' -o -perm -u+x \) -print0)
 		# 3) Finally the app wrapper WITH entitlements.
+		codesign --remove-signature "$APPB/RuneMobile" || die "remove signature failed: $APPB/RuneMobile"
 		codesign --force --sign - --generate-entitlement-der --entitlements "$ENTS" "$APPB" || die "ad-hoc sign app failed"
 		# --deep --strict verifies recursively: every nested component signed above must validate, not just the
 		# wrapper. (Everything is explicitly signed, so strict passes; a failure here is a real seal defect.)
 		codesign --verify --deep --strict "$APPB" || die "ad-hoc signature verify failed"
+		# Nothing identifying may be left: no profile, no .xcent, no certificate text in any file.
+		"$ROOT/tools/ci/check-ipa-clean.sh" "$APPB" || die "the sealed app still carries the developer's identity (see above)"
 		# The dump proves what the CI artifact declares — but the CI signature is disposable: SideStore strips it
 		# and re-signs on-device, and MAY filter entitlements against its own generated profile. Whether
 		# increased-memory-limit actually survives that re-sign is a DEVICE-INSTALL assertion (see needs-device).
