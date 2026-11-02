@@ -68,6 +68,9 @@ account-data row is opt-in.**
   stable machine fingerprint (hashed MACs/OS/account). This build dropped that upload, and upstream has
   since deleted the path outright; the local GE panel and trade history keep working either way.
 - **No crash reporting** — JVM crash logs are **not** uploaded anywhere; they remain on-device.
+  **Share logs** (on the About screen) packs them, with the app's own logs, into a text file on the
+  phone, with login tokens, emails and your character name taken out. It leaves the phone only if you
+  send it somewhere from the share sheet; the app uploads nothing itself.
 - **No analytics, ads, tracking, or fingerprinting.** No third-party SDKs of that kind are present.
 - **No gameplay data to anyone but Jagex, in the default configuration** — chat, inventory, location,
   XP, menu contents are part of the normal game connection to Jagex and are sent **nowhere else**
@@ -89,6 +92,8 @@ All paths are in the app's **private** storage unless marked *external* (adb-rea
 | Renderer choice, hotkeys | app preferences (`renderer`, `hotkeys`) | On-device only |
 | Diagnostics (GPU-fallback cookie, thermal marker) | `gpu-fail.txt`, `thermal-throttle.marker` (app-private) | **On-device only — never transmitted** |
 | Session-end record (iOS) | `residency.plist`, `residency-history.log` (app-private) | **On-device only — never transmitted.** How long each session lasted, how it ended, restart counters and a memory figure; the last 200 sessions |
+| App log and VM crash reports | iOS `hello-shell.log` (up to 8 MB per launch); `hs_err_pid*.log`, the newest three (app-private) | **On-device only.** Read by Share logs |
+| Share logs file | iOS `tmp/share-logs/`, Android `cache/share-logs/` (app-private) | Made only when you tap Share logs, and replaced by the next one. Leaves the phone only where you send it |
 | Embedded JVM + client jars (~500 MB) | `jvm/` | Unpacked from the app on first run |
 
 ### Debug-only (stripped from release builds)

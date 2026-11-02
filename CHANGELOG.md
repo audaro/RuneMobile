@@ -14,6 +14,10 @@ as "What's new".
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-01
+
+0.7.0 was tagged but never released; its changes ship here, so this is the first release since 0.6.0.
+
 ### Added
 - **Share logs, for bug reports.** One tap makes a text file to post with a report, and the phone's share sheet
   sends it to Discord, Messages or Files. It holds the app and device versions, the renderer, your plugins and
@@ -21,11 +25,8 @@ as "What's new".
   and your character name are taken out before the file is made. Find it on the About screen; on iPhone also at
   the top right of the start screen, and on Android on the "game stopped" card.
 - **A frozen game leaves a trail.** If the game stops moving for 20 seconds, RuneLite's log records what every
-  thread was doing, so Share logs can show what it was stuck on after you restart the app.
-
-## [0.7.0] - 2026-11-01
-
-### Added
+  thread was doing, and says so when the game's own thread has stopped, so Share logs can show what happened
+  after you restart the app.
 - **iOS: the Play screen says when StikDebug ran the wrong script,** before you tap Play. Right after the attach
   the app checks the script. If StikDebug attached without `runelite-jit.js` or ran a different one, Tap to Play
   stays off and the screen says which, instead of the app closing half a second after you tap it. The fix is the
@@ -34,6 +35,8 @@ as "What's new".
   still closes during start-up, the next launch says "The last start didn't finish" and how to fix it.
 
 ### Changed
+- **Updated for the 1 November game update** (RuneLite 1.13.5, game revision 242). Plugin Hub plugins now come
+  from RuneLite 1.13.5's list.
 - **iOS:** the release IPA is built the same way as the rolling builds: ad-hoc sealed, with no developer
   provisioning profile inside. SideStore and AltStore re-sign it at install, as before.
 
@@ -407,8 +410,8 @@ OAuth + RuneLite-account sync, native HUD/chat/tab-grid veneers, plugin panel.
 - Release signing: a dedicated key via `keystore.properties` when present, else
   the debug key (see `keystore.properties.example`).
 
-[Unreleased]: https://github.com/audaro/runemobile/compare/v0.7.0...HEAD
-[0.7.0]: https://github.com/audaro/runemobile/compare/v0.6.0...v0.7.0
+[Unreleased]: https://github.com/audaro/runemobile/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/audaro/runemobile/compare/v0.6.0...v0.7.1
 [0.6.0]: https://github.com/audaro/runemobile/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/audaro/runemobile/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/audaro/runemobile/compare/v0.3.1...v0.4.0
