@@ -15,8 +15,31 @@ region back in x0**. StikDebug's stock `universal.js` only returns a stub (`0xE0
 which HotSpot then tries to execute → crash (this is the crash we hit on the first device run).
 `runelite-jit.js` provides a real handler: allocate an RX region of `size` (`_M …,rx`), wire it up for
 TXM execution (`prepare_memory_region`), and return its address in x0. Our libjvm reserves the whole code
-cache (`-XX:ReservedCodeCacheSize=64m`) in that one call at VM start, so the script services the single
+cache (`-XX:ReservedCodeCacheSize=64m`) in one such call at VM start, so the script services a single
 request and then detaches; the RX mapping and `CS_DEBUGGED` outlive the detach.
+
+### The app asks first (the script check)
+The request the script answers no longer comes from libjvm. As soon as RuneMobile sees a debugger attached
+(`P_TRACED`), the cover makes the same request itself: `brk #0x69` with the 64 MB size in x0 (and x1 zeroed),
+from a thunk in `JVMLauncher.m` (`jitCheckRun`). Then it reads the answer:
+
+| Answer | Meaning | Cover |
+|---|---|---|
+| all 64 MB mapped RX (walked with `vm_region`) | `runelite-jit.js` (it detaches right after) | "Ready to play" |
+| `0xe0000069` | `universal.js` | "StikDebug ran a different script" |
+| the size, handed back | `legacy.js`, `maciOS.js` or `Geode.js` | "StikDebug ran a different script" |
+| nothing: the brk arrives as `SIGTRAP` | StikDebug let go without a script | "StikDebug isn't running runelite-jit.js" |
+
+A SIGTRAP handler is in place for the check, so an unanswered request returns 0 instead of killing the app.
+At Tap to Play the app answers libjvm's own `brk #0x69` in-process with the region from the check
+(`jitServeTrap`, the same handler the simulator build uses to map its code cache), so the JVM starts with
+no debugger attached. If the check never ran (the debug panel's Start), an attached script answers libjvm
+directly, as before.
+
+The check runs while the script holds the whole process, so the cover first shows "Checking StikDebug's
+script…" and stays frozen on it if a script never answers. The `jit-startup-armed` marker in Application
+Support covers that case and a JVM that still dies during start-up: it is written before each request and
+removed when the request returns, so if it survives, the next launch shows "The last start didn't finish".
 
 It uses only StikDebug's documented builtins (`get_pid`, `send_command`, `prepare_memory_region`, `log`),
 the GDB remote protocol, and the AArch64 BRK encoding — no app-side native glue required.
@@ -87,12 +110,11 @@ The bundle has no frameworks or extensions (one arm64 binary), so there is nothi
 
 ## Run loop
 1. **Attach StikDebug** to RuneMobile (with `runelite-jit.js` assigned). The script logs
-   `[rl-jit] attached …` and waits for `brk #0x69`. Opened without the attach, RuneMobile's cover just reads
-   "Attach StikDebug to play…".
-2. In RuneMobile, once the cover reads "Ready to play" (`CS_DEBUGGED` is set), tap **Tap to Play**. Watch
-   StikDebug's log:
-   - one `[rl-jit] #1 brk#0x69 size=0x… -> RX 0x…` line, then `[rl-jit] detached after reservation`;
-   - RuneMobile then boots to the game's login screen.
+   `[rl-jit] attached …`, and the cover's script check follows straight away: one
+   `[rl-jit] #1 brk#0x69 size=0x4000000 -> RX 0x…` line, then `[rl-jit] detached after reservation`. Opened
+   without the attach, RuneMobile's cover just reads "Attach StikDebug to play…".
+2. Once the cover reads "Ready to play", tap **Tap to Play**. RuneMobile boots to the game's login screen
+   with no debugger attached; its own log shows `[jvm] JIT handover: brk#0x69 size=0x4000000 -> RX 0x… kr=0`.
 
 ## If it still crashes / hangs
 Capture both logs. Useful signals:
@@ -127,6 +149,7 @@ Capture both logs. Useful signals:
   Scripts" setting only forces TXM mode, which every iPhone already gets on iOS 27 (and the 14,2 or newer
   models on iOS 26). Fix: long-press RuneMobile in StikDebug's app list → **Reset Script**, then **Assign Script**.
   First seen 2026-10-31 on an iPhone 15 right after an iOS update. That reset and re-assign fixed it.
+  The app now says so before Tap to Play: see "The app asks first" above.
 - **`_M alloc FAILED`** → RX allocation rejected (try a smaller `-XX:ReservedCodeCacheSize` than the 64m in
   the JVM options in `JVMLauncher.m`).
 - **`[rl-jit] forward pc=…`** → the stop wasn't a `brk #0x69` on any thread, so it went to the VM's own

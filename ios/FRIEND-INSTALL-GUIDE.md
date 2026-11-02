@@ -102,10 +102,13 @@ This app needs a custom script so JIT works — the normal StikDebug "just conne
 - *App won't launch / just hangs* → JIT wasn't enabled. Do the StikDebug step (LocalDevVPN on first), then reopen.
 - *Attaches but crashes, or no `[rl-jit]` lines in StikDebug's log* → the script isn't assigned. Redo
   Step 5 (import `runelite-jit.js` and assign it to RuneMobile).
-- *Tap to Play works, then the app closes half a second after "Starting up…"* (often after updating iOS,
-  StikDebug or RuneMobile) → StikDebug switched JIT on without running the script. In StikDebug's app list,
-  long-press RuneMobile → **Reset Script**, then **Assign Script** → `runelite-jit.js`, and attach again.
-  The "Always Run Scripts" setting doesn't fix this; it never assigns a script.
+- *"StikDebug isn't running runelite-jit.js" or "StikDebug ran a different script" under a dimmed Tap to
+  Play, a cover stuck on "Checking StikDebug's script…", or "The last start didn't finish" when the app
+  opens* (on older builds: the app closes half a second after "Starting up…"). This often
+  happens after updating iOS, StikDebug or RuneMobile → StikDebug switched JIT on without the script, or ran
+  a different or old one. In StikDebug's app list, long-press RuneMobile → **Reset Script**, then
+  **Assign Script** → the `runelite-jit.js` from the latest release, and attach again. The "Always Run
+  Scripts" setting doesn't fix this; it never assigns a script.
 - *Only one VPN runs at a time* → use SideStore's VPN to install/refresh, LocalDevVPN to enable JIT.
   Toggle whichever you need for the task at hand.
 - *"Unable to install" in SideStore* → make sure SideStore's VPN is on and you're signed into your Apple ID.

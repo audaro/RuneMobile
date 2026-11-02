@@ -322,6 +322,8 @@ static NSString *RMPasteLine(NSString *s) {
 @property (nonatomic, assign) int jvmFd;   // raw fd for crash-proof libjvm stdout/stderr
 @property (nonatomic, assign) BOOL launched;
 @property (nonatomic, assign) long jitAttachedMs;     // Phase 4 cold start: first poll that saw CS_DEBUGGED (0 = not yet)
+@property (nonatomic, assign) BOOL jitScriptlessLogged; // the "attached without runelite-jit.js" line went to the log once
+@property (nonatomic, assign) BOOL jitWasTracing;       // the last poll saw a debugger attached (a new attach starts the script check)
 @property (nonatomic, assign) BOOL inWorldStamped;    // Phase 4 cold start: the first LOGGED_IN tick has been stamped
 @property (nonatomic, assign) BOOL awakeInGame;       // keep-awake: the last snapshot was logged in
 @property (nonatomic, assign) CFTimeInterval awakeLeftGameAt; // keep-awake: when loggedIn last fell (CACurrentMediaTime)
@@ -641,6 +643,7 @@ static NSString *RMPasteLine(NSString *s) {
 @property (nonatomic, strong) UILabel *fatalErrorBody;
 @property (nonatomic, assign) BOOL fatalErrorShown;
 @property (nonatomic, assign) BOOL layoutNoticeShown; // UX-ONBOARD-02: launch layout hint, once per process
+@property (nonatomic, assign) BOOL jitStartupChecked; // the last launch's JIT-startup record was read (once per process)
 // One-tap layout switch (updateLayoutSwitch): the pill, the start of the current run of unsupported-layout frames
 // (0 = supported or logged out) and the outstanding switch (0 = none), both CACurrentMediaTime.
 @property (nonatomic, strong) UIButton *layoutSwitchButton;
@@ -1229,7 +1232,33 @@ static NSString *const kLayoutNoticeBody =
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
+    [self maybeShowJitStartupFailure];
     [self maybeShowLayoutNotice];
+}
+
+// The previous launch died or froze during a code-cache request (the cover's script check, or JNI_CreateJavaVM).
+// The check names a wrong script before Tap to Play (startJitPolling); this covers what it can't: a script that
+// never answers it, or one that answers it and then fails the JVM. Once per process; the record is consumed whether
+// or not the alert can be shown.
+- (void)maybeShowJitStartupFailure {
+    if (self.jitStartupChecked)
+        return;
+    self.jitStartupChecked = YES;
+    if (![JVMLauncher takeJitStartupFailure])
+        return;
+    [self appendLine:@"[shell] the last launch died or froze during a brk #0x69 code-cache request: StikDebug ran "
+                     @"another script or an outdated runelite-jit.js"];
+    if (self.fatalErrorShown || self.presentedViewController != nil)
+        return;
+    UIAlertController *ac = [UIAlertController
+        alertControllerWithTitle:@"The last start didn't finish"
+                         message:@"RuneMobile closed while it was starting up. That usually means StikDebug ran the "
+                                 @"wrong script, or an old copy of runelite-jit.js.\n\nIn StikDebug, long-press "
+                                 @"RuneMobile → Reset Script, then Assign Script → the runelite-jit.js from the latest "
+                                 @"release, and attach again.\n\nIf you closed the app yourself, ignore this."
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:ac animated:YES completion:nil];
 }
 
 - (void)maybeShowLayoutNotice {
@@ -1332,7 +1361,7 @@ static NSString *const kLayoutNoticeBody =
     status.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
     status.textColor = [UIColor systemYellowColor];
     status.textAlignment = NSTextAlignmentCenter;
-    status.numberOfLines = 2;
+    status.numberOfLines = 3; // the script-check messages wrap to a third line on narrow phones
     [cover addSubview:status];
     self.playStatusLabel = status;
 
@@ -1478,6 +1507,10 @@ static NSString *const kLayoutNoticeBody =
 }
 
 - (void)onPlayTapped {
+    // Only a served script check has the JVM's code cache ready; without it the JVM's brk #0x69 can kill the app.
+    // The poller can be a tick behind, so ignore the tap; the next tick turns the button off and says why.
+    if ([JVMLauncher jitScriptCheck] != RMJitScriptCheckServed)
+        return;
     // If the login web view ran this session, WebKit is resident and the JVM can't start cleanly — onLaunch
     // will prompt a restart instead. Keep the cover up in that case so the user lands back here post-restart.
     // Tap to Play boots the renderer the user SELECTED in the plugins panel, saved in NSUserDefaults
@@ -4174,19 +4207,64 @@ static void *perfProbePump(void *unused) {
             // From here on, losing this process costs the user the whole attach again.
             [RMResidency noteJitAttached];
         }
-        self.statusLabel.text = attached ? @"JIT: CS_DEBUGGED ✓ (ready)" : @"JIT: waiting…";
-        self.statusLabel.textColor = attached ? [UIColor systemGreenColor] : [UIColor systemYellowColor];
-        // #1: drive the Tap-to-Play cover. Enable the big play button on attach; reflect the gate in its status.
-        if (attached) {
+        // CS_DEBUGGED says a debugger attached, not which script it ran, and the wrong one used to show only as a
+        // crash half a second after Tap to Play. So when a debugger appears, the app asks it for the JVM's code
+        // cache right away (JVMLauncher startJitScriptCheck): runelite-jit.js maps it and detaches, and any other
+        // answer keeps Tap to Play off. A debugger that let go without answering (no script) shows the same way.
+        BOOL tracing = [JVMLauncher isDebuggerTracing];
+        RMJitScriptCheck check = [JVMLauncher jitScriptCheck];
+        if (attached && tracing && !self.jitWasTracing && check != RMJitScriptCheckServed &&
+            check != RMJitScriptCheckRunning) {
+            [self appendLine:@"[shell] debugger attached: asking it for the code cache (brk #0x69) to check the script"];
+            [JVMLauncher startJitScriptCheck:^(RMJitScriptCheck result, NSString *line) {
+                [self appendLine:line];
+            }];
+            check = RMJitScriptCheckRunning;
+        }
+        self.jitWasTracing = tracing;
+        BOOL ready = check == RMJitScriptCheckServed;
+        BOOL checking = check == RMJitScriptCheckRunning;
+        BOOL wrongScript = check == RMJitScriptCheckWrongAnswer;
+        BOOL scriptless = attached && !ready && !checking && !wrongScript;
+        if (scriptless && !self.jitScriptlessLogged) {
+            self.jitScriptlessLogged = YES;
+            [self appendLine:@"[shell] CS_DEBUGGED but no script answered the code-cache check: StikDebug ran without "
+                             @"runelite-jit.js, so Tap to Play stays off"];
+        }
+        self.statusLabel.text = ready         ? @"JIT: CS_DEBUGGED ✓, code cache from runelite-jit.js (ready)"
+                                : checking    ? @"JIT: CS_DEBUGGED, checking the script…"
+                                : wrongScript ? @"JIT: CS_DEBUGGED, wrong script (no RX memory for brk #0x69)"
+                                : scriptless  ? @"JIT: CS_DEBUGGED, no debugger (script not running)"
+                                              : @"JIT: waiting…";
+        self.statusLabel.textColor = ready                         ? [UIColor systemGreenColor]
+                                     : (wrongScript || scriptless) ? [UIColor systemOrangeColor]
+                                                                   : [UIColor systemYellowColor];
+        // #1: drive the Tap-to-Play cover. The big play button is on only while a launch can work; reflect the gate
+        // in its status.
+        if (ready) {
             self.playStatusLabel.text = @"Ready to play";
             self.playStatusLabel.textColor = [UIColor systemGreenColor];
-            if (!self.playButton.enabled) {
-                self.playButton.enabled = YES;
-                [UIView animateWithDuration:0.2 animations:^{ self.playButton.alpha = 1.0; }];
-            }
+        } else if (checking) {
+            // A script that never answers freezes the app on this frame, so it says what to do in that case too.
+            self.playStatusLabel.text = @"Checking StikDebug's script…\nIf this stays, assign runelite-jit.js to RuneMobile.";
+            self.playStatusLabel.textColor = [UIColor systemYellowColor];
+        } else if (wrongScript) {
+            self.playStatusLabel.text = @"StikDebug ran a different script.\nAssign runelite-jit.js to RuneMobile, close "
+                                        @"RuneMobile, and attach again.";
+            self.playStatusLabel.textColor = [UIColor systemOrangeColor];
+        } else if (scriptless) {
+            self.playStatusLabel.text = @"StikDebug isn't running runelite-jit.js.\nAssign it to RuneMobile, then attach again.";
+            self.playStatusLabel.textColor = [UIColor systemOrangeColor];
         } else {
             self.playStatusLabel.text = @"Attach StikDebug to play…";
             self.playStatusLabel.textColor = [UIColor systemYellowColor];
+        }
+        if (self.playButton.enabled != ready) {
+            self.playButton.enabled = ready;
+            [UIView animateWithDuration:0.2
+                             animations:^{
+                                 self.playButton.alpha = ready ? 1.0 : 0.5;
+                             }];
         }
         if (attached && !self.launchButton.enabled && !self.launched) {
             self.launchButton.enabled = YES;
@@ -6442,6 +6520,17 @@ static const CFTimeInterval kKeepAwakeGrace = 10.0;
 // A self-contained diagnostics report for pasting into a bug note: device/OS environment, the live readout,
 // the JIT gate, then the on-screen log. Never empty (environment + metrics are always present), which is why
 // Copy log and Share build on this rather than the raw console (Debug-only, and empty before boot).
+// The diagnostics report's JIT line: CS_DEBUGGED, whether a debugger is attached now, and the script check.
+- (NSString *)devJitStateText {
+    if (![JVMLauncher isDebuggerAttached])
+        return @"not attached";
+    static NSString *const checks[] = {@"not checked", @"checking", @"script OK", @"no answer", @"wrong script"};
+    RMJitScriptCheck check = [JVMLauncher jitScriptCheck];
+    NSString *checkText = (check >= 0 && check < 5) ? checks[check] : @"?";
+    return [NSString stringWithFormat:@"CS_DEBUGGED · %@ · %@",
+                                      [JVMLauncher isDebuggerTracing] ? @"debugger attached" : @"detached", checkText];
+}
+
 - (NSString *)devReportText {
     [self refreshDevDiagnostics]; // ensure the readout reflects this instant
     struct utsname sys;
@@ -6449,7 +6538,7 @@ static const CFTimeInterval kKeepAwakeGrace = 10.0;
     double ramGB = [NSProcessInfo processInfo].physicalMemory / (1024.0 * 1024.0 * 1024.0);
     NSString *env = [NSString stringWithFormat:@"Device    %s · iOS %@ · %.0f GB RAM\nJIT       %@",
                                                sys.machine, [UIDevice currentDevice].systemVersion, ramGB,
-                                               [JVMLauncher isDebuggerAttached] ? @"CS_DEBUGGED" : @"not attached"];
+                                               [self devJitStateText]];
     NSString *log = self.console.text.length ? self.console.text : @"(log is captured only in debug builds)";
     return [NSString stringWithFormat:@"RuneMobile diagnostics\n%@\n%@\n\n--- log ---\n%@",
                                       env, self.diagLabel.text ?: @"", log];
@@ -6619,6 +6708,13 @@ static const CFTimeInterval kKeepAwakeGrace = 10.0;
 
 - (void)onLaunch {
     if (self.launched) return;
+    // The debug panel's Start needs only CS_DEBUGGED. While the cover's script check is out, runelite-jit.js answers
+    // one brk #0x69 and detaches, so a JVM started now would race the check for it and the loser dies of SIGTRAP.
+    // (No check can start after this: the poller that starts them is stopped below.)
+    if ([JVMLauncher jitScriptCheck] == RMJitScriptCheckRunning) {
+        [self appendLine:@"[shell] launch refused: the StikDebug script check is still running; try again"];
+        return;
+    }
     // If the login web view ran this session, WebKit is resident and the JVM would crash at code-cache
     // init (the JIT brk can't be serviced). Require a fresh process first — restart instead of launching.
     if (self.webKitUsedThisSession) { [self promptRestartToPlay]; return; }

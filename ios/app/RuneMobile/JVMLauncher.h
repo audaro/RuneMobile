@@ -40,6 +40,35 @@ typedef void (^JVMLogSink)(NSString *line);
 /// kernel marks this process debugged. Poll this BEFORE warming HotSpot.
 + (BOOL)isDebuggerAttached;
 
+/// True while a debugger is attached to this process right now (P_TRACED). Unlike CS_DEBUGGED, which stays set
+/// after a detach, this tells "a StikDebug script is attached" from "StikDebug attached and let go without one".
+/// YES in the simulator (no attach there) and when the state can't be read.
++ (BOOL)isDebuggerTracing;
+
+/// The cover's check of the attached StikDebug script (startJitScriptCheck).
+typedef NS_ENUM(NSInteger, RMJitScriptCheck) {
+    RMJitScriptCheckNotRun = 0,  ///< nothing asked yet
+    RMJitScriptCheckRunning,     ///< the request is out; the script holds the whole process while it answers
+    RMJitScriptCheckServed,      ///< runelite-jit.js mapped the code cache; Tap to Play can start the JVM
+    RMJitScriptCheckUnanswered,  ///< no debugger took the request (StikDebug let go without a script)
+    RMJitScriptCheckWrongAnswer, ///< a debugger answered, but not with RX memory: another script
+};
+
+/// Where the check stands. Always RMJitScriptCheckServed in the simulator, which maps its own code cache.
++ (RMJitScriptCheck)jitScriptCheck;
+
+/// Device only: asks the attached script for the JVM's code cache now, with the same `brk #0x69` request libjvm
+/// makes, so a wrong script shows on the cover instead of killing the app after Tap to Play. runelite-jit.js
+/// answers it with RX memory and detaches; the JVM is handed that memory at start-up (JNI_CreateJavaVM) with no
+/// debugger needed. Call it only while a debugger is attached (isDebuggerTracing). No-op while a check is running
+/// or after one was served. `done` runs on the main queue with the result and a log line.
++ (void)startJitScriptCheck:(void (^)(RMJitScriptCheck result, NSString *line))done;
+
+/// YES once if the previous launch died inside JNI_CreateJavaVM or the cover's script check, where the code-cache
+/// request is answered: the attached StikDebug script was not (a current) runelite-jit.js. Clears the record as it
+/// reads it.
++ (BOOL)takeJitStartupFailure;
+
 /// Optional RWX canary (the W1-audit Claim E "tiny TXM preflight"). Maps a page,
 /// writes `mov w0,#42; ret`, flips it to RX and calls it. Returns 42 on
 /// success. NOTE: a plain mprotect RW->RX canary may FALSE-NEGATIVE under the

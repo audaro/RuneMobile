@@ -1092,7 +1092,7 @@ static NSString *jstringToNS(JNIEnv *env, jstring js) {
 + (BOOL)isDebuggerAttached {
 #if TARGET_OS_SIMULATOR
     // What this gates is "the JVM can JIT", and in the simulator that always holds: it runs under macOS rules
-    // and services HotSpot's brk #0x69 in-process (simJitArm), so there is no attach to wait for.
+    // and services HotSpot's brk #0x69 in-process (jitServeArm), so there is no attach to wait for.
     return YES;
 #endif
     int flags = 0;
@@ -1100,6 +1100,48 @@ static NSString *jstringToNS(JNIEnv *env, jstring js) {
         return NO; // EPERM etc. -> treat as not-yet-debugged
     }
     return (flags & CS_DEBUGGED) != 0;
+}
+
++ (BOOL)isDebuggerTracing {
+#if TARGET_OS_SIMULATOR
+    return YES; // the simulator services the brk in-process (jitServeArm)
+#endif
+    struct kinfo_proc kp;
+    size_t len = sizeof kp;
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()};
+    if (sysctl(mib, 4, &kp, &len, NULL, 0) != 0 || len == 0)
+        return YES; // unknown: say attached; the script check copes with no debugger (jitCheckTrap)
+    return (kp.kp_proc.p_flag & P_TRACED) != 0;
+}
+
+// JIT-startup marker: written just before a code-cache request (the cover's script check, then JNI_CreateJavaVM)
+// and removed as soon as it returns. A marker left behind means the process died or froze there: StikDebug ran a
+// script that the check couldn't read, or an outdated runelite-jit.js. In Application Support beside the GPU boot
+// marker, written atomically.
+static NSString *jitStartupMarkerPath(void) {
+    NSString *dir = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES)
+        firstObject];
+    return [dir stringByAppendingPathComponent:@"jit-startup-armed"];
+}
+
+static void jitStartupMarkerArm(void) {
+    NSString *path = jitStartupMarkerPath();
+    [[NSFileManager defaultManager] createDirectoryAtPath:[path stringByDeletingLastPathComponent]
+                              withIntermediateDirectories:YES
+                                               attributes:nil
+                                                    error:nil];
+    [[NSData data] writeToFile:path options:NSDataWritingAtomic error:nil];
+}
+
+static void jitStartupMarkerClear(void) {
+    [[NSFileManager defaultManager] removeItemAtPath:jitStartupMarkerPath() error:nil];
+}
+
++ (BOOL)takeJitStartupFailure {
+    if (![[NSFileManager defaultManager] fileExistsAtPath:jitStartupMarkerPath()])
+        return NO;
+    jitStartupMarkerClear();
+    return YES;
 }
 
 + (int)runRwxCanary:(JVMLogSink)log {
@@ -1488,15 +1530,17 @@ static void restoreBreakpointPortToDebugger(JVMLogSink log) {
     for (mach_msg_type_number_t i = 0; i < nb; i++) if (bp[i]) mach_port_deallocate(mach_task_self(), bp[i]);
 }
 
-#if TARGET_OS_SIMULATOR
-// Simulator stand-in for StikDebug's runelite-jit.js. CodeCache::initialize reserves the code cache with ONE
-// `brk #0x69` (BreakGetJITMapping: size in x0, RX address back in x0), and on a device the debugger answers it.
-// The simulator runs under macOS rules, where a process may map its own RX memory, so a SIGTRAP handler does
-// the debugger's part: vm_allocate + vm_protect(RX), what debugserver's `_M<size>,rx` does. HotSpot then makes
-// its own RW mirror. MAP_JIT does NOT work here: HotSpot can't remap a JIT region and dies at its first stub.
-// The handler and an empty task BREAKPOINT port (so no Mach handler can take the brk first) are in place only
-// for JNI_CreateJavaVM; a debugger that owned that port (Xcode's lldb) gets it back afterwards.
-#define SIM_BRK_JIT_MAPPING 0xD4200D20u // brk #0x69
+// HotSpot's code cache, answered in-process. CodeCache::initialize reserves it with ONE `brk #0x69`
+// (BreakGetJITMapping: size in x0, RX address back in x0). jitServeArm puts a SIGTRAP handler and an empty task
+// BREAKPOINT port (so no Mach handler, WebKit's included, can take the brk first) in place for JNI_CreateJavaVM only;
+// whatever owned that port (Xcode's lldb in the simulator) gets it back afterwards.
+// - Simulator: it runs under macOS rules, where a process may map its own RX memory, so the handler does what
+//   debugserver's `_M<size>,rx` does: vm_allocate + vm_protect(RX). HotSpot then makes its own RW mirror. MAP_JIT
+//   does NOT work there: HotSpot can't remap a JIT region and dies at its first stub.
+// - Device: TXM won't let the app map RX memory itself, so the region is the one runelite-jit.js mapped for the
+//   cover's script check (jitCheckRun) before it detached. The handler hands it over, once.
+#define BRK_JIT_MAPPING 0xD4200D20u                // brk #0x69
+#define JIT_CODE_CACHE_BYTES ((vm_size_t)64 << 20) // -XX:ReservedCodeCacheSize, and what the script check asks for
 
 typedef struct {
     exception_mask_t masks[EXC_TYPES_COUNT];
@@ -1504,28 +1548,41 @@ typedef struct {
     exception_behavior_t behs[EXC_TYPES_COUNT];
     thread_state_flavor_t flavs[EXC_TYPES_COUNT];
     mach_msg_type_number_t n;
-} SimBreakpointPorts;
+} JitBreakpointPorts;
 
-static struct sigaction sSimPrevTrap;
+#if TARGET_OS_SIMULATOR
+#define JIT_SERVE_TAG @"sim JIT"
+#else
+#define JIT_SERVE_TAG @"JIT handover"
+// The region runelite-jit.js mapped for the script check (0 = none). Written before the check reports Served, which
+// is before Tap to Play can start the JVM; read by jitServeTrap.
+static vm_address_t sJitCheckAddr;
+static vm_size_t sJitCheckSize;
+#endif
+
+static struct sigaction sJitServePrevTrap;
 // Written by the handler and logged after VM creation (no logging inside a signal handler).
-static volatile vm_size_t sSimJitSize;
-static volatile vm_address_t sSimJitAddr;
-static volatile kern_return_t sSimJitKr = KERN_FAILURE;
+static volatile vm_size_t sJitServeSize;
+static volatile vm_address_t sJitServeAddr;
+static volatile kern_return_t sJitServeKr = KERN_FAILURE;
+static volatile int sJitServeCalls;
 
-static void simJitTrap(int sig, siginfo_t *info, void *ucv) {
+static void jitServeTrap(int sig, siginfo_t *info, void *ucv) {
     (void)sig;
     (void)info;
     ucontext_t *uc = (ucontext_t *)ucv;
     uint64_t pc = uc->uc_mcontext->__ss.__pc;
-    if (*(const uint32_t *)pc != SIM_BRK_JIT_MAPPING) {
-        sigaction(SIGTRAP, &sSimPrevTrap, NULL); // not ours: the trap re-runs under the previous disposition
+    if (*(const uint32_t *)pc != BRK_JIT_MAPPING) {
+        sigaction(SIGTRAP, &sJitServePrevTrap, NULL); // not ours: the trap re-runs under the previous disposition
         return;
     }
-    // Safe in a handler here: this trap is synchronous (one known HotSpot instruction, no lock held), and for our
-    // own task vm_allocate/vm_protect are direct Mach traps (_kernelrpc_mach_vm_*_trap), not MIG messages.
     vm_size_t size = (vm_size_t)uc->uc_mcontext->__ss.__x[0];
     vm_address_t addr = 0;
-    kern_return_t kr = vm_allocate(mach_task_self(), &addr, size, VM_FLAGS_ANYWHERE);
+    kern_return_t kr;
+#if TARGET_OS_SIMULATOR
+    // Safe in a handler here: this trap is synchronous (one known HotSpot instruction, no lock held), and for our
+    // own task vm_allocate/vm_protect are direct Mach traps (_kernelrpc_mach_vm_*_trap), not MIG messages.
+    kr = vm_allocate(mach_task_self(), &addr, size, VM_FLAGS_ANYWHERE);
     if (kr == KERN_SUCCESS) {
         kr = vm_protect(mach_task_self(), addr, size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
         if (kr != KERN_SUCCESS) {
@@ -1533,23 +1590,33 @@ static void simJitTrap(int sig, siginfo_t *info, void *ucv) {
             addr = 0;
         }
     }
-    sSimJitSize = size;
-    sSimJitAddr = addr;
-    sSimJitKr = kr;
+#else
+    // HotSpot asks once. A second request, or one bigger than the check's region, has nothing left to take.
+    if (sJitServeCalls == 0 && size != 0 && size <= sJitCheckSize) {
+        addr = sJitCheckAddr;
+        kr = KERN_SUCCESS;
+    } else {
+        kr = KERN_NO_SPACE;
+    }
+#endif
+    sJitServeCalls++;
+    sJitServeSize = size;
+    sJitServeAddr = addr;
+    sJitServeKr = kr;
     uc->uc_mcontext->__ss.__x[0] = addr; // 0 = failed; HotSpot reports the failed reservation itself
     uc->uc_mcontext->__ss.__pc = pc + 4;
 }
 
-static void simJitArm(SimBreakpointPorts *saved, JVMLogSink log) {
+static void jitServeArm(JitBreakpointPorts *saved, JVMLogSink log) {
     struct sigaction sa;
     memset(&sa, 0, sizeof sa);
-    sa.sa_sigaction = simJitTrap;
+    sa.sa_sigaction = jitServeTrap;
     sa.sa_flags = SA_SIGINFO;
     sigemptyset(&sa.sa_mask);
-    if (sigaction(SIGTRAP, &sa, &sSimPrevTrap) != 0)
-        log([NSString stringWithFormat:@"[jvm] sim JIT: SIGTRAP handler NOT armed (errno %d); the VM's brk#0x69 "
+    if (sigaction(SIGTRAP, &sa, &sJitServePrevTrap) != 0)
+        log([NSString stringWithFormat:@"[jvm] %@: SIGTRAP handler NOT armed (errno %d); the VM's brk#0x69 "
                                        @"will kill the app",
-                                       errno]);
+                                       JIT_SERVE_TAG, errno]);
 
     saved->n = EXC_TYPES_COUNT;
     kern_return_t kr = task_get_exception_ports(mach_task_self(), EXC_MASK_BREAKPOINT, saved->masks, &saved->n,
@@ -1557,21 +1624,22 @@ static void simJitArm(SimBreakpointPorts *saved, JVMLogSink log) {
     if (kr != KERN_SUCCESS) {
         // Without the old ports there would be nothing to put back, so leave them in place.
         saved->n = 0;
-        log([NSString stringWithFormat:@"[jvm] sim JIT: task BREAKPOINT ports unreadable kr=%d; left as they are", kr]);
+        log([NSString stringWithFormat:@"[jvm] %@: task BREAKPOINT ports unreadable kr=%d; left as they are",
+                                       JIT_SERVE_TAG, kr]);
         return;
     }
     kr = task_set_exception_ports(mach_task_self(), EXC_MASK_BREAKPOINT, MACH_PORT_NULL, EXCEPTION_DEFAULT,
                                   MACHINE_THREAD_STATE);
-    log([NSString stringWithFormat:@"[jvm] sim JIT: SIGTRAP handler armed, task BREAKPOINT port cleared kr=%d "
+    log([NSString stringWithFormat:@"[jvm] %@: SIGTRAP handler armed, task BREAKPOINT port cleared kr=%d "
                                    @"(%u saved)",
-                                   kr, saved->n]);
+                                   JIT_SERVE_TAG, kr, saved->n]);
 }
 
-static void simJitDisarm(SimBreakpointPorts *saved, JVMLogSink log) {
+static void jitServeDisarm(JitBreakpointPorts *saved, JVMLogSink log) {
     // Only while SIGTRAP is still ours: a handler the VM installed for itself during creation stays.
     struct sigaction cur;
-    if (sigaction(SIGTRAP, NULL, &cur) == 0 && cur.sa_sigaction == simJitTrap)
-        sigaction(SIGTRAP, &sSimPrevTrap, NULL);
+    if (sigaction(SIGTRAP, NULL, &cur) == 0 && cur.sa_sigaction == jitServeTrap)
+        sigaction(SIGTRAP, &sJitServePrevTrap, NULL);
     for (mach_msg_type_number_t i = 0; i < saved->n; i++) {
         if (saved->ports[i] == MACH_PORT_NULL)
             continue;
@@ -1579,10 +1647,158 @@ static void simJitDisarm(SimBreakpointPorts *saved, JVMLogSink log) {
                                  saved->flavs[i]);
         mach_port_deallocate(mach_task_self(), saved->ports[i]);
     }
-    log([NSString stringWithFormat:@"[jvm] sim JIT: brk#0x69 size=0x%lx -> RX 0x%lx kr=%d; handler disarmed",
-                                   (unsigned long)sSimJitSize, (unsigned long)sSimJitAddr, sSimJitKr]);
+    log([NSString stringWithFormat:@"[jvm] %@: brk#0x69 size=0x%lx -> RX 0x%lx kr=%d (%d request(s)); handler "
+                                   @"disarmed",
+                                   JIT_SERVE_TAG, (unsigned long)sJitServeSize, (unsigned long)sJitServeAddr,
+                                   sJitServeKr, sJitServeCalls]);
 }
 
+#if !TARGET_OS_SIMULATOR
+// The cover's script check. CS_DEBUGGED says a debugger attached, not which script it runs, and a wrong one used to
+// show only as a crash after Tap to Play. So the app makes libjvm's code-cache request itself as soon as a debugger
+// is attached, with the same `brk #0x69` and size, and reads the answer:
+// - runelite-jit.js maps RX memory, returns it in x0 and detaches. jitServeTrap hands that memory to the JVM later.
+// - universal.js returns 0xe0000069; legacy.js, maciOS.js and Geode.js "prepare" the size in x0 as if it were an
+//   address and hand it back. Neither is RX memory, so Tap to Play stays off.
+// - No debugger takes it (StikDebug let go): it arrives as SIGTRAP, and jitCheckTrap returns 0 instead of a crash.
+// x1 is zeroed first: legacy.js and Geode.js read it as a length and write one page per 16 KB of it.
+__attribute__((naked, noinline)) static uint64_t jitCheckRequest(uint64_t bytes) {
+    __asm__ volatile("mov x1, #0\n"
+                     "brk #0x69\n"
+                     "ret\n");
+}
+
+static struct sigaction sJitCheckPrevTrap;
+static volatile sig_atomic_t sJitCheckTrapped;
+static _Atomic int sJitCheckState = (int)RMJitScriptCheckNotRun;
+
+static void jitCheckTrap(int sig, siginfo_t *info, void *ucv) {
+    (void)sig;
+    (void)info;
+    ucontext_t *uc = (ucontext_t *)ucv;
+    uint64_t pc = uc->uc_mcontext->__ss.__pc;
+    if (pc != (uint64_t)(uintptr_t)jitCheckRequest + 4) { // the brk sits after the `mov x1, #0`
+        sigaction(SIGTRAP, &sJitCheckPrevTrap, NULL);     // not ours: re-run under the previous disposition
+        return;
+    }
+    sJitCheckTrapped = 1;
+    uc->uc_mcontext->__ss.__x[0] = 0;
+    uc->uc_mcontext->__ss.__pc = pc + 4;
+}
+
+// YES if all `bytes` from `addr` are mapped readable + executable, the only answer HotSpot can use. Walked entry by
+// entry: prepare_memory_region writes every page through the debugger, which can split the mapping into many map
+// entries, so one vm_region call would see only the first. `*entries` counts them; `*prot` is the first one's.
+static BOOL jitCheckAnswerIsRX(uint64_t addr, vm_size_t bytes, unsigned *entries, vm_prot_t *prot) {
+    *entries = 0;
+    *prot = VM_PROT_NONE;
+    if (addr == 0 || (addr & (vm_page_size - 1)) != 0 || addr + bytes < addr)
+        return NO;
+    const vm_prot_t rx = VM_PROT_READ | VM_PROT_EXECUTE;
+    vm_address_t cur = (vm_address_t)addr, end = (vm_address_t)(addr + bytes);
+    while (cur < end) {
+        vm_address_t start = cur;
+        vm_size_t size = 0;
+        vm_region_basic_info_data_64_t info;
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object = MACH_PORT_NULL;
+        kern_return_t kr = vm_region_64(mach_task_self(), &start, &size, VM_REGION_BASIC_INFO_64,
+                                        (vm_region_info_t)&info, &count, &object);
+        if (object != MACH_PORT_NULL)
+            mach_port_deallocate(mach_task_self(), object);
+        if (kr != KERN_SUCCESS || start > cur || size == 0) // start > cur: a hole at cur
+            return NO;
+        if ((*entries)++ == 0)
+            *prot = info.protection;
+        if ((info.protection & rx) != rx)
+            return NO;
+        cur = start + size;
+    }
+    return YES;
+}
+
+static RMJitScriptCheck jitCheckRun(JVMLogSink log) {
+    // A login web view shown before the attach can hold the task BREAKPOINT port; give it back to the debugger.
+    restoreBreakpointPortToDebugger(log);
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_sigaction = jitCheckTrap;
+    sa.sa_flags = SA_SIGINFO;
+    sigemptyset(&sa.sa_mask);
+    if (sigaction(SIGTRAP, &sa, &sJitCheckPrevTrap) != 0) {
+        // Without the handler an unanswered brk kills the app, so don't ask.
+        log([NSString stringWithFormat:@"[jvm] JIT check: SIGTRAP handler NOT armed (errno %d); not asked", errno]);
+        return RMJitScriptCheckUnanswered;
+    }
+    sJitCheckTrapped = 0;
+    // A script that never answers leaves the app frozen right here; the marker makes the next launch say why.
+    jitStartupMarkerArm();
+    uint64_t answer = jitCheckRequest(JIT_CODE_CACHE_BYTES);
+    jitStartupMarkerClear();
+    struct sigaction cur;
+    if (sigaction(SIGTRAP, NULL, &cur) == 0 && cur.sa_sigaction == jitCheckTrap)
+        sigaction(SIGTRAP, &sJitCheckPrevTrap, NULL);
+
+    if (sJitCheckTrapped) {
+        log(@"[jvm] JIT check: brk#0x69 came back to the app, no debugger answered it (StikDebug let go without "
+            @"runelite-jit.js)");
+        return RMJitScriptCheckUnanswered;
+    }
+    unsigned entries = 0;
+    vm_prot_t prot = VM_PROT_NONE;
+    if (!jitCheckAnswerIsRX(answer, JIT_CODE_CACHE_BYTES, &entries, &prot)) {
+        log([NSString stringWithFormat:@"[jvm] JIT check: the debugger answered brk#0x69 with 0x%llx (prot %d, %u "
+                                       @"map entries checked), not 64 MB of RX memory: StikDebug ran another script "
+                                       @"(universal.js answers 0xe0000069; legacy.js, maciOS.js and Geode.js hand "
+                                       @"back the size)",
+                                       (unsigned long long)answer, prot, entries]);
+        return RMJitScriptCheckWrongAnswer;
+    }
+    sJitCheckAddr = (vm_address_t)answer;
+    sJitCheckSize = JIT_CODE_CACHE_BYTES;
+    log([NSString stringWithFormat:@"[jvm] JIT check: runelite-jit.js mapped the code cache, RX 0x%llx (64 MB in %u "
+                                   @"map entries, prot %d); the JVM is handed it at start-up",
+                                   (unsigned long long)answer, entries, prot]);
+    return RMJitScriptCheckServed;
+}
+#endif
+
++ (RMJitScriptCheck)jitScriptCheck {
+#if TARGET_OS_SIMULATOR
+    return RMJitScriptCheckServed; // jitServeTrap maps the simulator's code cache itself
+#else
+    return (RMJitScriptCheck)atomic_load(&sJitCheckState);
+#endif
+}
+
++ (void)startJitScriptCheck:(void (^)(RMJitScriptCheck result, NSString *line))done {
+#if TARGET_OS_SIMULATOR
+    dispatch_async(dispatch_get_main_queue(), ^{
+        done(RMJitScriptCheckServed, @"[jvm] JIT check: not needed in the simulator");
+    });
+#else
+    int state = atomic_load(&sJitCheckState);
+    if (state == RMJitScriptCheckRunning || state == RMJitScriptCheckServed)
+        return;
+    atomic_store(&sJitCheckState, (int)RMJitScriptCheckRunning);
+    // The script stops the whole process while it answers (runelite-jit.js writes all 4096 pages), so let the
+    // cover's "Checking" frame reach the screen first: it then stays up through a script that never answers.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC),
+                   dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                       NSMutableArray<NSString *> *lines = [NSMutableArray array];
+                       RMJitScriptCheck result = jitCheckRun(^(NSString *line) {
+                           [lines addObject:line];
+                       });
+                       atomic_store(&sJitCheckState, (int)result);
+                       NSString *text = [lines componentsJoinedByString:@"\n"];
+                       dispatch_async(dispatch_get_main_queue(), ^{
+                           done(result, text);
+                       });
+                   });
+#endif
+}
+
+#if TARGET_OS_SIMULATOR
 // Bridge census (dev-tools/bridge-census/run-census-sim.sh). `-RMBridgeCensus <name>` names a list in Documents of
 // every class, method and field the native code looks up through JNI (bridge-census/extract-lookups.py). A thread
 // of its own waits for the client's first frame, resolves each entry against the running VM and writes
@@ -1894,7 +2110,8 @@ static void RMEnsureResizableDisplayMode(NSString *rlHome, JVMLogSink log) {
         @"-XX:+MirrorMappedCodeCache", // iOS-26 code cache (Amethyst jre21 patch)
         @"-XX:+DisablePrimordialThreadGuardPages",
         @"-XX:-UseCompressedClassPointers", // free cert: no extended-virtual-addressing
-        @"-XX:ReservedCodeCacheSize=64m",   // bound the brk #0x69 RX reservation
+        // bound the brk #0x69 RX reservation; the cover's script check asked for exactly this much
+        [NSString stringWithFormat:@"-XX:ReservedCodeCacheSize=%lum", (unsigned long)(JIT_CODE_CACHE_BYTES >> 20)],
         // NOTE (UPDATE 14): TieredStopAtLevel=1 + CICompilerCount=1 were tried and REVERTED — they did
         // NOT fix the §6.2 crash, they only MOVED it (code-cache is_unloading → GC heap corruption in
         // copy_to_survivor_space, with the crash reporter itself faulting = broad memory corruption).
@@ -2189,14 +2406,25 @@ static void RMEnsureResizableDisplayMode(NSString *rlHome, JVMLogSink log) {
 
     JavaVM *vm = NULL;
     JNIEnv *env = NULL;
+    JitBreakpointPorts jitPorts;
 #if TARGET_OS_SIMULATOR
-    SimBreakpointPorts simPorts;
-    simJitArm(&simPorts, log);
+    BOOL jitInApp = YES;
+#else
+    // The cover's script check already got the code cache from runelite-jit.js, which then detached, so the app
+    // answers HotSpot's brk itself. Without a served check (the debug panel's Start needs only CS_DEBUGGED), an
+    // attached script answers it as before.
+    BOOL jitInApp = sJitCheckAddr != 0;
+    log(jitInApp ? @"[jvm] code cache: handing over the region from the script check"
+                 : @"[jvm] code cache: no script check served; the attached debugger answers brk#0x69");
+    // Not in the simulator: it answers the brk itself, so a leftover marker there could only mean a harness kill.
+    jitStartupMarkerArm();
 #endif
+    if (jitInApp)
+        jitServeArm(&jitPorts, log);
     jint rc = JNI_CreateJavaVM(&vm, (void **)&env, &vmArgs);
-#if TARGET_OS_SIMULATOR
-    simJitDisarm(&simPorts, log);
-#endif
+    jitStartupMarkerClear(); // returned, so the code cache was served: a failure from here on is not the script's
+    if (jitInApp)
+        jitServeDisarm(&jitPorts, log);
     if (rc != JNI_OK || !vm || !env) { log([NSString stringWithFormat:@"[jvm] FATAL JNI_CreateJavaVM rc=%d", rc]); return -14; }
     // Publish the VM so the main thread's live-blit + touch bridge can attach into it (atomic store —
     // the main thread loads it with atomic_load in ensureBridge).
