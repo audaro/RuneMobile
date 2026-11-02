@@ -23,9 +23,11 @@ object Redact {
             Regex("(?i)([?&][a-z_]*(?:code|token|state|session|key|secret|password)[a-z_]*=)[^&\\s\"'#]+") to "$1<redacted>",
             // key=value, key: value and "key":"value"
             Regex(
-                "(?i)\\b((?:access|refresh|id|auth)[_-]?token|token|(?:[a-z]+[_-])?(?:password|passwd|secret)|session[_-]?id|session|" +
-                    "authorization|api[_-]?key|character[_-]?id|account[_-]?id|display[_-]?name|user[_-]?name|" +
-                    "jx_[a-z_]+)([\"']?\\s*[:=]\\s*[\"']?)([^\\s\"',;&}\\]]{4,})",
+                // Any key that ENDS in a listed name: oauth_client_secret, clientSecret, x_api_key. The lazy
+                // [a-z0-9_-]*? reaches inside the word, where \b can't (no boundary after "client_").
+                "(?i)\\b([a-z0-9_-]*?(?:token|password|passwd|secret|session[_-]?id|session|authorization|" +
+                    "api[_-]?key|character[_-]?id|account[_-]?id|display[_-]?name|user[_-]?name|jx_[a-z_]+))" +
+                    "([\"']?\\s*[:=]\\s*[\"']?)([^\\s\"',;&}\\]]{4,})",
             ) to "$1$2<redacted>",
             // Emails
             Regex("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}") to "<email>",

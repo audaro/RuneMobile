@@ -49,6 +49,10 @@
 > GET /oauth/token?client_secret=<redacted>&lang=en 200
 < client_secret=fakeclientval9 db_password: fakepassval9
 > client_secret=<redacted> db_password: <redacted>
+< oauth_client_secret=fakeclientval9 clientSecret: fakeclientval8 oauth_access_token=fakeaccessval9 x_api_key=fakekeyval9
+> oauth_client_secret=<redacted> clientSecret: <redacted> oauth_access_token=<redacted> x_api_key=<redacted>
+< max_tokens=4096 tokenizer: wordpiece positions=12345
+> max_tokens=4096 tokenizer: wordpiece positions=12345
 
 # Emails and UUIDs
 < RuneLite account player.one+osrs@example.co.uk signed in
