@@ -2265,7 +2265,7 @@ static void RMEnsureResizableDisplayMode(NSString *rlHome, JVMLogSink log) {
         // 1.13.4-SNAPSHOT client certainly has, while a newer manifest can call API added after our merge base
         // and fail at load. check-hub-pin.sh holds this equal to runelite.properties; change both, and verify
         // the manifest answers 200 first.
-        @"-Drunelite.pluginhub.version=1.13.4",
+        @"-Drunelite.pluginhub.version=1.13.5",
         @"-Drunelite.rendererpanel=true", // arm RendererPanelStarter: load GPU + 117HD (no-start) into
                                           // the panel so both are selectable + configurable.
         @"-Drunelite.nosplash=true",      // no desktop Swing splash (its JFrame creation under CACIO
