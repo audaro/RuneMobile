@@ -114,3 +114,5 @@ This app needs a custom script so JIT works — the normal StikDebug "just conne
 - *"Unable to install" in SideStore* → make sure SideStore's VPN is on and you're signed into your Apple ID.
 - *Can't enable Developer Mode* → you must have a passcode set first, then look under
   Settings → Privacy & Security.
+- *Anything else* → tap **Share logs** (top right of the start screen, or on the About screen) and post the file
+  with what you did just before it went wrong. It takes out your login tokens, emails and character name.

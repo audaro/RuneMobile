@@ -250,6 +250,10 @@ object JvmLauncher {
     /** P2-1 dev panel: JVM heap usage as "usedMB/maxMB" (JavaBridge.heapStats). "" before the bridge is up. */
     external fun nativeHeapStats(): String
 
+    /** "Share logs": DiagnosticsBridge.engineReport() as {"names":[...],"text":"..."}; "" before the VM is up or on
+     *  an older jar. Blocking: call it on a thread of its own (DiagnosticsReport.kt does, with a time limit). */
+    external fun nativeEngineDiagnostics(): String
+
     /** P2-1 dev panel: exercise the auto-reconnect path for [seconds] so the Reconnecting overlay can be verified
      *  without a real network drop. No-op on an older jar. Call OFF the UI thread (via [onBridge]). */
     external fun nativeSimulateReconnect(seconds: Int)

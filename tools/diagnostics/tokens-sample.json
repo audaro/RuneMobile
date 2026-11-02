@@ -1,0 +1,19 @@
+{
+  "access_token": "",
+  "refresh_token": "",
+  "id_token": "",
+  "expires_in": 0,
+  "scope": "",
+  "session_id": "3f9c1e7a-55b2-4c0d-9e8f-1a2b3c4d5e6f",
+  "accounts": [
+    { "accountId": "100200300400", "displayName": "Iron Man", "userHash": "a1b2c3d4e5f6a7b8c9d0" },
+    { "accountId": "100200300401", "displayName": null },
+    { "accountId": "100200300402", "displayName": "Quillfeather" }
+  ],
+  "otl_token": "",
+  "fetched_at": "2026-11-01T10:00:00Z",
+  "chosen_account_id": "100200300400",
+  "chosen_display_name": "Iron Man",
+  "mode": "internal",
+  "nested": { "deeper": [ { "display_name": "Ash Wren", "account_id": "998877665544", "note": "not a secret" } ] }
+}

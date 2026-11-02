@@ -10,6 +10,8 @@
 #
 # The checks, in order. A failed check doesn't stop the run, so one run shows everything that is wrong; only a
 # failed build or install does.
+#   0. redaction         diagnostics/test-redaction.sh: the "Share logs" redaction (RMRedact.m, built for the
+#                        Mac) against tools/diagnostics/redaction-cases.txt, the cases Android's RedactTest checks
 #   1. build + install   ./run-sim.sh --no-launch
 #   2. census            bridge-census/run-census-sim.sh: every JNI lookup the native code makes resolves
 #   3. screens           sim-screens/sim-screens.py: the native screens match their goldens
@@ -132,6 +134,15 @@ for devs in json.load(sys.stdin)["devices"].values():
             print(d["name"])
 ' "$SIM_UDID")"
 log "sim-gate on ${SIM_NAME_SHOWN:-?} ($SIM_UDID); output in $RUN"
+
+# 0) "Share logs" redaction, before anything needs the simulator (~2 s).
+log "Share-logs redaction cases"
+if out="$(bash ios/dev-tools/diagnostics/test-redaction.sh 2>&1)"; then
+  record redaction PASS "$(tail -1 <<<"$out")"
+else
+  printf '%s\n' "$out" | tail -12
+  record redaction FAIL "$(tail -1 <<<"$out")"
+fi
 
 # 1) Build + install. Everything after this uses the installed app.
 flags=(--no-launch)

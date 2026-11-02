@@ -128,6 +128,9 @@ public final class BridgeCensus
 		"WorldSwitcherBridge#getWorldListJson()",
 		"WorldSwitcherBridge#hop(int)",
 		"WorldSwitcherBridge#tick(Client)",
+		// --- DiagnosticsBridge: "Share logs" engine section + freeze watchdog ---
+		"DiagnosticsBridge#init(PluginManager,Client)",
+		"DiagnosticsBridge#engineReport()",
 	};
 
 	public static void main(String[] args)

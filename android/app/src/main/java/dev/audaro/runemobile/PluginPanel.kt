@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -69,6 +70,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -670,11 +672,7 @@ private fun AboutScreen(onBack: () -> Unit) {
                         fontSize = 22.sp,
                         style = MaterialTheme.typography.titleLarge,
                     )
-                    Text(
-                        "Version ${BuildConfig.VERSION_NAME}",
-                        color = Color(0xFF9E9E9E),
-                        fontSize = 12.sp,
-                    )
+                    Text("Version ${BuildConfig.VERSION_NAME}", color = Color(0xFF9E9E9E), fontSize = 12.sp)
                 }
             }
 
@@ -703,8 +701,23 @@ private fun AboutScreen(onBack: () -> Unit) {
                     "game cache at runtime — the same way the upstream RuneLite client does — so the art is never " +
                     "redistributed.",
             )
+            ReportProblemSection()
             Spacer(Modifier.heightIn(min = 16.dp))
         }
+    }
+}
+
+// "Share logs" (Diagnostics.kt), for bug reports. Also on the "game stopped" card, which covers this screen.
+@Composable
+private fun ReportProblemSection() {
+    AboutSection(
+        "Report a problem",
+        "Share logs makes a text file to post with your bug report. Login tokens, emails and your " +
+            "character name are taken out first.",
+    )
+    val context = LocalContext.current
+    TextButton(onClick = { Diagnostics.share(context) }, contentPadding = PaddingValues(horizontal = 0.dp)) {
+        Text("Share logs", color = Color(0xFFFFC733), fontSize = 15.sp, fontWeight = FontWeight.Bold)
     }
 }
 

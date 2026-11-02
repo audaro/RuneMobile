@@ -50,7 +50,7 @@ CAUSE = re.compile(r"^\s*(?:Caused by|Suppressed): ")
 # Lines that are an event on their own, whatever precedes them.
 OWN_EVENTS = (
     ("FAULT", re.compile(r"\[(?:bridge|json)-fault\]")),
-    ("FATAL", re.compile(r"\bFATAL\b|A fatal error has been detected|hs_err_pid")),
+    ("FATAL", re.compile(r"\bFATAL\b|A fatal error has been detected|An error report file with more information is saved")),
     ("WARN", re.compile(r"\bVM warning: ")),
     ("WARN", re.compile(r"NOT YET IMPLEMENTED")),
     ("FAILED", re.compile(r"^\[[A-Za-z][\w:.+-]*\] .*(?:\bFAILED\b|\bfailed\b[: ]|did not survive|boot-failure)")),

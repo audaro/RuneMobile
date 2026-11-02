@@ -52,6 +52,7 @@ import net.runelite.client.config.ProfileManager;
 import net.runelite.client.config.RuneLiteConfig;
 import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.headless.ConfigProfileBridge;
+import net.runelite.client.headless.DiagnosticsBridge;
 import net.runelite.client.headless.HudVeneerBridge;
 import net.runelite.client.headless.JavaBridge;
 import net.runelite.client.headless.MobileUiBridge;
@@ -132,6 +133,8 @@ public class HeadlessClientUI extends ClientUI
 			}
 		}
 
+		// "Share logs" engine section + the freeze watchdog (thread dump to client.log); always on.
+		DiagnosticsBridge.init(pluginManager, rsClient);
 		if (MobileUiBridge.isEnabled())
 		{
 			// Wire the Phase-6 mobile-UI facade to the live singletons. Done here because this is the one

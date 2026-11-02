@@ -1,0 +1,13 @@
+# gitleaks (tools/git-hooks/pre-commit runs it when installed): the default rules, plus the fake secrets the
+# "Share logs" redaction fixtures need, allowed by exact value in that one file. A real secret there is still caught.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Fake token and key in the redaction test cases"
+condition = "AND"
+paths = ['''^tools/diagnostics/redaction-cases\.txt$''']
+regexes = [
+  '''^eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIn0\.c2lnbmF0dXJlLXZhbHVl$''',
+  '''^abcdef123456$''',
+]

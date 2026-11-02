@@ -13,16 +13,19 @@ import android.view.View
  * "fatalError"/"fatalCode", noted from RSAppletStub.onError via MobileChromeBridge). Desktop RuneLite routes
  * these to a Swing FatalErrorDialog the headless boot can't render — without this card, every weekly OSRS
  * update ends in a silent black screen (stale client rev -> error_game_js5connect). This is a TERMINAL
- * state: the applet is dead and nothing recovers, so the card latches on and its single "Restart app" button
+ * state: the applet is dead and nothing recovers, so the card latches on and its "Restart app" button
  * relaunches the process (the same clean-boot mechanism as the renderer restarts; for a stale-rev js5connect
- * the copy tells the user a rebuilt app is needed). Consumes touches while visible, like
- * [SessionExpiredOverlayView].
+ * the copy tells the user a rebuilt app is needed). "Share logs" beside it opens [Diagnostics], since the card
+ * covers the plugin panel's About screen. Consumes touches while visible, like [SessionExpiredOverlayView].
  */
 class FatalErrorOverlayView(
     context: Context,
 ) : View(context) {
     /** Invoked when the user taps "Restart app". */
     var onRestart: (() -> Unit)? = null
+
+    /** Invoked when the user taps "Share logs". */
+    var onShareLogs: (() -> Unit)? = null
 
     private var active = false
     private var title = ""
@@ -79,6 +82,7 @@ class FatalErrorOverlayView(
 
     private val cardRect = RectF()
     private val buttonRect = RectF()
+    private val shareRect = RectF()
 
     init {
         isClickable = false
@@ -152,8 +156,12 @@ class FatalErrorOverlayView(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!active) return false
         // Consume everything while visible; fire the callback on an up inside the button.
-        if (event.action == MotionEvent.ACTION_UP && buttonRect.contains(event.x, event.y)) {
-            onRestart?.invoke()
+        if (event.action == MotionEvent.ACTION_UP) {
+            if (buttonRect.contains(event.x, event.y)) {
+                onRestart?.invoke()
+            } else if (shareRect.contains(event.x, event.y)) {
+                onShareLogs?.invoke()
+            }
         }
         return true
     }
@@ -182,16 +190,21 @@ class FatalErrorOverlayView(
             y += lineH
         }
 
-        // "Restart app" button.
-        val btnW = cardW - dp(48f)
+        // "Share logs" and "Restart app", side by side.
+        val gap = dp(12f)
+        val rowW = cardW - dp(48f)
+        val btnW = (rowW - gap) / 2f
         val btnH = dp(46f)
-        val btnLeft = cx - btnW / 2f
+        val rowLeft = cx - rowW / 2f
         val btnTop = top + cardH - btnH - dp(22f)
-        buttonRect.set(btnLeft, btnTop, btnLeft + btnW, btnTop + btnH)
+        shareRect.set(rowLeft, btnTop, rowLeft + btnW, btnTop + btnH)
+        buttonRect.set(rowLeft + btnW + gap, btnTop, rowLeft + rowW, btnTop + btnH)
         val br = dp(8f)
-        canvas.drawRoundRect(buttonRect, br, br, buttonPaint)
-        canvas.drawRoundRect(buttonRect, br, br, buttonBorderPaint)
-        val tBaseline = buttonRect.centerY() - (buttonTextPaint.ascent() + buttonTextPaint.descent()) / 2f
-        canvas.drawText("Restart app", cx, tBaseline, buttonTextPaint)
+        val tOffset = -(buttonTextPaint.ascent() + buttonTextPaint.descent()) / 2f
+        for ((rect, label) in listOf(shareRect to "Share logs", buttonRect to "Restart app")) {
+            canvas.drawRoundRect(rect, br, br, buttonPaint)
+            canvas.drawRoundRect(rect, br, br, buttonBorderPaint)
+            canvas.drawText(label, rect.centerX(), rect.centerY() + tOffset, buttonTextPaint)
+        }
     }
 }

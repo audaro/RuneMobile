@@ -397,6 +397,11 @@ val stageBootAssets =
 // A clean tree self-stages before the asset merge; an already-staged tree skips every step above (onlyIf) → no
 // overhead on the normal incremental loop.
 tasks.named("preBuild") { dependsOn(stageBootAssets) }
+// RedactTest reads the shared cases from outside this module; declare them so an edit there reruns the test
+// instead of leaving it UP-TO-DATE.
+tasks.withType<Test>().configureEach {
+    inputs.dir(rootProject.file("../tools/diagnostics")).withPathSensitivity(PathSensitivity.RELATIVE)
+}
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
@@ -410,4 +415,9 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // RedactTest: the "Share logs" redaction against tools/diagnostics/ (release gate stage 1g). The real org.json
+    // too (android.jar's is a stub): Redact.collectAccount parses tokens.json with it.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

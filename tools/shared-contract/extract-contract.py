@@ -26,7 +26,7 @@ FILES = [os.path.join(HEADLESS, f) for f in (
     'HudDataBridge.java', 'HudVeneerBridge.java', 'QuestHelperBridge.java', 'WorldSwitcherBridge.java',
     'LootTrackerBridge.java', 'XpTrackerBridge.java', 'GrandExchangeBridge.java', 'TimeTrackingBridge.java',
     'OverlayBridge.java', 'InfoBoxBridge.java', 'ConfigProfileBridge.java',
-    'RuneLiteAccountBridge.java',
+    'RuneLiteAccountBridge.java', 'DiagnosticsBridge.java',
     'HeadlessLogin.java', 'HeadlessResize.java',
     # ARCH-2: the renderer boot seams — their -D gates (runelite.routecrlhd / runelite.gfxIos) are part of
     # the host-called surface; a rename must force a baseline ack or it silently breaks the other port's

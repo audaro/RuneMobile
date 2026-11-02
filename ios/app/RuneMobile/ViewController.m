@@ -7,6 +7,7 @@
 #import "OverlayEditView.h"
 #import "JagexLoginViewController.h"
 #import "GLRecon.h"
+#import "RMDiagnostics.h"
 #import "RMKeyboardDismiss.h"
 #import "RMResidency.h"
 #import "RMGameSettings.h"
@@ -37,6 +38,7 @@
 // taps above/below a tab still register on that column. Purely a hit-test grow — the visible sprite is unchanged.
 static const CGFloat kChatTabTouchExpand = 15.0;     // screen pt added above each tab's touch rect
 static const CGFloat kChatTabTouchExpandBelow = 4.0; // and below it, short of the chat's top line
+static const unsigned long long kShellLogCap = 8ull << 20; // hello-shell.log bytes per launch (appendLine)
 @interface ChatTabButton : UIButton
 @end
 @implementation ChatTabButton
@@ -319,6 +321,7 @@ static NSString *RMPasteLine(NSString *s) {
 @property (nonatomic, strong) UILabel *statusLabel;
 @property (nonatomic, strong) NSTimer *jitTimer;
 @property (nonatomic, strong) NSFileHandle *logFile;
+@property (nonatomic, assign) unsigned long long logBytes; // written to logFile this launch
 @property (nonatomic, assign) int jvmFd;   // raw fd for crash-proof libjvm stdout/stderr
 @property (nonatomic, assign) BOOL launched;
 @property (nonatomic, assign) long jitAttachedMs;     // Phase 4 cold start: first poll that saw CS_DEBUGGED (0 = not yet)
@@ -1377,6 +1380,16 @@ static NSString *const kLayoutNoticeBody =
     [cover addSubview:login];
     self.playLoginButton = login;
 
+    // "Share logs", top right: a problem at this screen (no JIT, a crash right after Tap to Play, the last start
+    // didn't finish) is the one a player most needs to report, and they can't reach About from here.
+    UIButton *shareLogs = [UIButton buttonWithType:UIButtonTypeSystem];
+    shareLogs.translatesAutoresizingMaskIntoConstraints = NO;
+    [shareLogs setTitle:@"Share logs" forState:UIControlStateNormal];
+    shareLogs.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightRegular];
+    [shareLogs setTitleColor:[UIColor colorWithWhite:0.62 alpha:1.0] forState:UIControlStateNormal];
+    [shareLogs addTarget:self action:@selector(onShareLogsTapped:) forControlEvents:UIControlEventTouchUpInside];
+    [cover addSubview:shareLogs];
+
     // Hidden affordance: a triple-tap on the cover drops to the W1 debug panel (canary / AWT-activation /
     // logs) without launching — the dev escape hatch the audit asked to gate behind a hidden gesture.
     UITapGestureRecognizer *devTap = [[UITapGestureRecognizer alloc]
@@ -1407,6 +1420,13 @@ static NSString *const kLayoutNoticeBody =
     ]];
 
     [NSLayoutConstraint activateConstraints:@[
+        [shareLogs.topAnchor constraintEqualToAnchor:cover.safeAreaLayoutGuide.topAnchor
+                                            constant:8],
+        [shareLogs.trailingAnchor constraintEqualToAnchor:cover.safeAreaLayoutGuide.trailingAnchor
+                                                 constant:-16],
+    ]];
+
+    [NSLayoutConstraint activateConstraints:@[
         [logo.centerXAnchor constraintEqualToAnchor:cover.centerXAnchor],
         [logo.bottomAnchor constraintEqualToAnchor:title.topAnchor
                                           constant:-10],
@@ -1417,6 +1437,11 @@ static NSString *const kLayoutNoticeBody =
     ]];
 
     [self refreshLaunchLogin];
+}
+
+- (void)onShareLogsTapped:(UIButton *)sender {
+    [self appendLine:@"[shell] share logs: opened from the cover"];
+    [RMDiagnostics shareFrom:self sourceView:sender];
 }
 
 // Mirror the saved tokens.json onto the launch-screen login button (same source as refreshLoginButton).
@@ -3913,8 +3938,11 @@ static NSString * const kRendererHdClass  = @"rs117.hd.HdPlugin";
 #pragma mark - Logging
 
 - (void)openLogFile {
-#if DEBUG
-    NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+    // Debug keeps both logs in the Files/USB-exposed Documents dir for off-device retrieval. Release keeps only
+    // the app's own lines (hello-shell.log; no engine output, QA-P1-12) in the sandboxed App Support dir, where
+    // "Share logs" (RMDiagnostics) reads them: without it a release build had nothing to send for a JIT or
+    // start-up problem, which happens before RuneLite's client.log exists.
+    NSString *dir = [JVMLauncher appLogDir];
     // CompleteUnlessOpen, NOT Complete: the keepalive keeps these files being written while the screen is
     // locked, and Complete makes a file unwritable once locked. The class is set at creation and persists;
     // opened here while unlocked, the fd/handle stays writable after the device locks.
@@ -3931,20 +3959,20 @@ static NSString * const kRendererHdClass  = @"rs117.hd.HdPlugin";
         [fm removeItemAtPath:previous error:NULL];
         [fm moveItemAtPath:current toPath:previous error:NULL];
     };
-    NSString *path = [docs stringByAppendingPathComponent:@"hello-shell.log"];
+    NSString *path = [dir stringByAppendingPathComponent:@"hello-shell.log"];
     rotate(path);
     [[NSFileManager defaultManager] createFileAtPath:path contents:nil attributes:prot];
     self.logFile = [NSFileHandle fileHandleForWritingAtPath:path];
+#if DEBUG
     // Separate raw file for libjvm stdout/stderr, written synchronously (survives a
     // crash) so the [JIT26] mapping trace + the Hello verdict are always retrievable.
-    NSString *jpath = [docs stringByAppendingPathComponent:@"jvm-stdio.log"];
+    NSString *jpath = [dir stringByAppendingPathComponent:@"jvm-stdio.log"];
     rotate(jpath);
     [[NSFileManager defaultManager] createFileAtPath:jpath contents:nil attributes:prot];  // protection persists across open()
     self.jvmFd = open(jpath.UTF8String, O_WRONLY | O_CREAT | O_TRUNC, 0600);
 #else
-    // QA-P1-12: the daily-driver (Release) build writes no log sinks to the (no-longer-file-shared) Documents
-    // dir. logFile stays nil (appendLine's file write no-ops on nil); force jvmFd negative so captureStdio's
-    // `jvmFd >= 0` guard skips the dup2 (the default int property is 0, which would alias fd 0/stdin).
+    // QA-P1-12: no engine stdout/stderr sink in Release. Force jvmFd negative so captureStdio's `jvmFd >= 0`
+    // guard skips the dup2 (the default int property is 0, which would alias fd 0/stdin).
     self.jvmFd = -1;
 #endif
 }
@@ -3957,8 +3985,16 @@ static NSString * const kRendererHdClass  = @"rs117.hd.HdPlugin";
     dispatch_async(dispatch_get_main_queue(), ^{
         // File first (the retrievable hello-shell.log). No per-line synchronizeFile — that fsync was a 1–10ms
         // main-thread stall every line; jvm-stdio.log (dup2'd, unbuffered) is the crash-proof channel.
-        // In Release self.logFile is nil (openLogFile writes no sinks) so this is a no-op.
-        [self.logFile writeData:[out dataUsingEncoding:NSUTF8StringEncoding]];
+        // Capped so a line logged every frame can't fill the phone over a long session; the start of a launch
+        // is the part a start-up problem needs, and a launch normally writes well under 100 KB.
+        if (self.logFile && self.logBytes < kShellLogCap) {
+            NSData *bytes = [out dataUsingEncoding:NSUTF8StringEncoding];
+            self.logBytes += bytes.length;
+            [self.logFile writeData:bytes];
+            if (self.logBytes >= kShellLogCap)
+                [self.logFile writeData:[@"(log stopped here: 8 MB written this launch)\n"
+                                            dataUsingEncoding:NSUTF8StringEncoding]];
+        }
 
 #if DEBUG
         // Console: append via textStorage so each line is O(append), not the O(n) whole-string rebuild +
@@ -9894,7 +9930,9 @@ static CGRect mapRectFromArr(NSArray *a) {
 //              names], "config": [[group, key, value]]}, so panels this config hides (a plugin switched off, a
 //              button only shown in one place) get swept too, or a capture shows the game without a plugin. It
 //              first saves what it changes to screen-restore.json;
-//   restore    puts that back. The next simulator launch does too, if a sweep died before it got there.
+//   restore    puts that back. The next simulator launch does too, if a sweep died before it got there;
+//   report     writes the "Share logs" report (RMDiagnostics reportText) to Documents/screen-report.txt, for
+//              ios/dev-tools/diagnostics/sim-report-check.py.
 
 static NSString *simScreenSeq;    // the last command's seq
 static NSString *simScreenOpened; // "<seq> <screen>" opened and not yet reported ready
@@ -9991,7 +10029,7 @@ static const CFTimeInterval kSimConfirmTimeout = 15.0;
     }
     __weak typeof(self) ws = self;
     if ([name isEqualToString:@"inventory"] || [name isEqualToString:@"prepare"] ||
-        [name isEqualToString:@"restore"]) {
+        [name isEqualToString:@"restore"] || [name isEqualToString:@"report"]) {
         void (^answer)(NSString *) = ^(NSString *why) {
             [ws appendLine:why ? [NSString stringWithFormat:@"[screen] failed %@ %@: %@", seq, name, why]
                                : [NSString stringWithFormat:@"[screen] ready %@ %@", seq, name]];
@@ -10000,7 +10038,19 @@ static const CFTimeInterval kSimConfirmTimeout = 15.0;
             answer([self simWriteInventory:[docs stringByAppendingPathComponent:@"screen-inventory.json"]]);
         else if ([name isEqualToString:@"prepare"])
             [self simPrepare:docs then:answer];
-        else
+        else if ([name isEqualToString:@"report"]) {
+            // Built off the main thread, as the Share logs button does: it waits for the engine.
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                NSString *text = [RMDiagnostics reportText];
+                BOOL ok = [text writeToFile:[docs stringByAppendingPathComponent:@"screen-report.txt"]
+                                 atomically:YES
+                                   encoding:NSUTF8StringEncoding
+                                      error:NULL];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    answer(ok ? nil : @"couldn't write screen-report.txt");
+                });
+            });
+        } else
             [self simRestore:[docs stringByAppendingPathComponent:@"screen-restore.json"] then:answer];
         return;
     }

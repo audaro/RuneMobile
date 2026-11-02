@@ -686,6 +686,12 @@ class MainActivity : AppCompatActivity() {
     private var sessionExpiredTestReceiver: BroadcastReceiver? = null
     private var thermalTestReceiver: BroadcastReceiver? = null
 
+    // Debug-only: write the "Share logs" report (DiagnosticsReport.text, already redacted) where adb can fetch it,
+    // to check what it holds without driving the share sheet.
+    //   adb shell am broadcast -a dev.audaro.runemobile.WRITE_SHARE_LOGS_REPORT
+    //   adb pull /sdcard/Android/data/dev.audaro.runemobile/files/share-logs-report.txt
+    private var shareLogsTestReceiver: BroadcastReceiver? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Game settings > Screen: the root's layout listener resizes the canvas to the turned window (FOLD-3).
@@ -814,6 +820,27 @@ class MainActivity : AppCompatActivity() {
                 this,
                 thermalTestReceiver,
                 IntentFilter("dev.audaro.runemobile.SET_THERMAL_STATUS"),
+                ContextCompat.RECEIVER_EXPORTED,
+            )
+            shareLogsTestReceiver =
+                object : BroadcastReceiver() {
+                    override fun onReceive(
+                        ctx: Context?,
+                        intent: Intent?,
+                    ) {
+                        val app = applicationContext
+                        Thread({
+                            val out = File(app.getExternalFilesDir(null) ?: app.filesDir, "share-logs-report.txt")
+                            runCatching { out.writeText(DiagnosticsReport.text(app)) }
+                                .onSuccess { Log.i(TAG, "WRITE_SHARE_LOGS_REPORT: ${out.length() shr 10} KB -> $out") }
+                                .onFailure { Log.w(TAG, "WRITE_SHARE_LOGS_REPORT failed", it) }
+                        }, "rm-share-logs-test").start()
+                    }
+                }
+            ContextCompat.registerReceiver(
+                this,
+                shareLogsTestReceiver,
+                IntentFilter("dev.audaro.runemobile.WRITE_SHARE_LOGS_REPORT"),
                 ContextCompat.RECEIVER_EXPORTED,
             )
         }
@@ -1005,6 +1032,7 @@ class MainActivity : AppCompatActivity() {
                     finishAffinity()
                     Runtime.getRuntime().exit(0)
                 }
+                onShareLogs = { Diagnostics.share(this@MainActivity) }
             }
         // UX-DISCRETE-01 / ENH-B06: the "Hopping…" scrim (non-interactive; armed at the hop trigger sites, hidden
         // from updateChrome's loggedIn signal / a timeout).
@@ -5432,6 +5460,8 @@ class MainActivity : AppCompatActivity() {
         sessionExpiredTestReceiver = null
         thermalTestReceiver?.let { runCatching { unregisterReceiver(it) } }
         thermalTestReceiver = null
+        shareLogsTestReceiver?.let { runCatching { unregisterReceiver(it) } }
+        shareLogsTestReceiver = null
         thermalGovernor?.stop()
         thermalGovernor = null // PERF-MEMORY-THERMAL-01: unregister + restore the baseline scale
         armHopScrimHook = null // ENH-B06: drop the static hook so a dead activity can't be re-armed
@@ -5711,6 +5741,7 @@ class MainActivity : AppCompatActivity() {
 
         // A writable RuneLite home + headless capture dir (the gamepack cache + PNG fallback evidence).
         val home = app.filesDir.absolutePath
+        Diagnostics.pruneVmCrashReports(app.filesDir, keep = 3)
         // AG3-c: in rlhd mode put the capture dir on EXTERNAL storage so Firebase --directories-to-pull can fetch the
         // 117HD-rendered frames (the composited output, written by HeadlessCapture once isGpu=true).
         val captureBase = if (rlhd) (app.getExternalFilesDir(null) ?: app.filesDir) else app.filesDir
@@ -5756,6 +5787,8 @@ class MainActivity : AppCompatActivity() {
                 // Fail fast at heap exhaustion instead of limping (seams no-op, GC thrash): a clean exit
                 // routes into the existing crash-fallback/relaunch UX and leaves a diagnosable hs_err trail.
                 "-XX:+ExitOnOutOfMemoryError",
+                // A VM crash report lands where "Share logs" reads it (the default, the working dir, isn't writable).
+                "-XX:ErrorFile=$home/hs_err_pid%p.log",
                 "-Duser.home=$home",
                 "-Djava.io.tmpdir=$tmpDir",
                 "-Drunelite.bridge=true",

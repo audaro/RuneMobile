@@ -1247,6 +1247,73 @@ static long xmsMarkerMb(NSString *v) {
     return as;
 }
 
++ (NSString *)appLogDir {
+#if DEBUG
+    return NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+#else
+    return [self appSupportDir];
+#endif
+}
+
+// "Share logs": DiagnosticsBridge.engineReport() on a thread made for the call, attached for it and detached
+// after, so a GCD worker is never left attached. Read as UTF-16, not modified UTF-8: a plugin or thread name with an
+// emoji would make stringWithUTF8String return nil and lose the whole section.
+static NSString *engineReportOnThisThread(JavaVM *vm) {
+    JNIEnv *env = NULL;
+    if ((*vm)->AttachCurrentThreadAsDaemon(vm, (void **)&env, NULL) != JNI_OK || !env)
+        return nil;
+    NSString *out = nil;
+    jclass cls = (*env)->FindClass(env, "net/runelite/client/headless/DiagnosticsBridge");
+    jmethodID mid = cls ? (*env)->GetStaticMethodID(env, cls, "engineReport", "()Ljava/lang/String;") : NULL;
+    jstring js = mid ? (jstring)(*env)->CallStaticObjectMethod(env, cls, mid) : NULL;
+    if (js && !(*env)->ExceptionCheck(env)) {
+        const jchar *chars = (*env)->GetStringChars(env, js, NULL);
+        if (chars) {
+            out = [NSString stringWithCharacters:chars length:(NSUInteger)(*env)->GetStringLength(env, js)];
+            (*env)->ReleaseStringChars(env, js, chars);
+        }
+    }
+    (*env)->ExceptionClear(env); // no such class or method (an older jar), or the report threw
+    if (js)
+        (*env)->DeleteLocalRef(env, js);
+    if (cls)
+        (*env)->DeleteLocalRef(env, cls);
+    (*vm)->DetachCurrentThread(vm);
+    return out;
+}
+
++ (BOOL)vmStarted {
+    return atomic_load(&gVM) != NULL;
+}
+
++ (NSString *)engineDiagnosticsJSONWaiting:(NSTimeInterval)seconds timedOut:(BOOL *)timedOut {
+    if (timedOut)
+        *timedOut = NO;
+    JavaVM *vm = atomic_load(&gVM);
+    if (!vm)
+        return nil;
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    NSMutableArray<NSString *> *box = [NSMutableArray array]; // the answer, if the thread gets one in time
+    NSThread *thread = [[NSThread alloc] initWithBlock:^{
+        NSString *json = engineReportOnThisThread(vm);
+        @synchronized(box) {
+            if (json)
+                [box addObject:json];
+        }
+        dispatch_semaphore_signal(done);
+    }];
+    thread.name = @"rm-share-logs";
+    [thread start];
+    if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC))) != 0) {
+        if (timedOut)
+            *timedOut = YES; // the thread stays parked in the VM; a later share starts a new one
+        return nil;
+    }
+    @synchronized(box) {
+        return box.firstObject;
+    }
+}
+
 + (NSString *)tokensPath {
 #if TARGET_OS_SIMULATOR
     // -RMSkipLogin YES (the screen goldens, the bridge census): this launch reads and writes a tokens file of its
@@ -1286,6 +1353,25 @@ static long xmsMarkerMb(NSString *v) {
 // into the shared build. Returns YES iff a usable session was found (session_id + chosen_account_id), so
 // autologin only arms when we can authenticate. Mirrors run-headless-login.sh's jq mapping. Env MUST be set
 // before JNI_CreateJavaVM (HotSpot snapshots the environment at startup). Logs presence only — never values.
+// Keep the newest `keep` hs_err_pid*.log files in `dir` and delete the rest.
+static void pruneVmCrashReports(NSString *dir, NSUInteger keep) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSMutableArray<NSString *> *reports = [NSMutableArray array];
+    for (NSString *name in [fm contentsOfDirectoryAtPath:dir error:NULL]) {
+        if ([name hasPrefix:@"hs_err_pid"] && [name hasSuffix:@".log"])
+            [reports addObject:[dir stringByAppendingPathComponent:name]];
+    }
+    if (reports.count <= keep)
+        return;
+    [reports sortUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        NSDate *da = [fm attributesOfItemAtPath:a error:NULL].fileModificationDate ?: [NSDate distantPast];
+        NSDate *db = [fm attributesOfItemAtPath:b error:NULL].fileModificationDate ?: [NSDate distantPast];
+        return [db compare:da]; // newest first
+    }];
+    for (NSUInteger i = keep; i < reports.count; i++)
+        [fm removeItemAtPath:reports[i] error:NULL];
+}
+
 static BOOL loadJagexTokens(JVMLogSink log) {
     NSString *path = [JVMLauncher tokensPath];
     NSData *data = [NSData dataWithContentsOfFile:path];
@@ -2219,6 +2305,11 @@ static void RMEnsureResizableDisplayMode(NSString *rlHome, JVMLogSink log) {
     // untraceable jetsam kill — a clean exit lands in the normal relaunch flow and leaves an hs_err
     // trail. (Kept out of the literal above: any edit inside it makes clang-format reflow the block.)
     [opts addObject:@"-XX:+ExitOnOutOfMemoryError"];
+    // A VM crash report (hs_err) where "Share logs" finds it. Without this HotSpot tries the working directory
+    // ("/", read-only) and then /tmp, which an app can't write either, so a JVM crash left nothing behind.
+    // %p keeps one file per crash (HotSpot won't overwrite one); the oldest beyond three are removed here.
+    pruneVmCrashReports([JVMLauncher appLogDir], 3);
+    [opts addObject:[NSString stringWithFormat:@"-XX:ErrorFile=%@/hs_err_pid%%p.log", [JVMLauncher appLogDir]]];
     // WorldHopper's ping loads JNA, which always fails here: the jar's native lib for this platform is the macOS
     // build. JNA first extracts it to user.home/Library/Caches/JNA/temp and, the load failing, never deletes it.
     // nounpack fails the same load without the extraction.

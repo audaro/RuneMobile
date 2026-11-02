@@ -70,7 +70,9 @@ body:
   - type: textarea
     attributes:
       label: Logs (redacted)
-      description: Attach redacted logcat / console output. Remove any tokens or display names first.
+      description: >-
+        Attach the file from Share logs (iOS: the start screen or About; Android: the plugin panel's About screen).
+        It removes login tokens, emails and your character name; read it before you post it.
     validations:
       required: false
   - type: checkboxes

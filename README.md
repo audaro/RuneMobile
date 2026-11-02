@@ -422,12 +422,21 @@ supports it, so they cannot help you and reports there only create noise for
 volunteers working on something else. Reproducible bugs are still best filed as a
 GitHub issue so they do not get lost in chat.
 
-When asking for help, **never paste `tokens.json`, an `access_token`, a
-`refresh_token`, or an unredacted log** — see [Privacy & security](#privacy--security).
+When asking for help, attach the file from **Share logs**. On iOS it is at the top
+right of the start screen and on the About screen; on Android it is on the plugin
+panel's About screen and on the "game stopped" card. It holds the app and device
+versions, your plugins, recent log lines and, if the game froze or crashed, what
+it was doing. Login tokens, emails and your character name are taken out before
+the file is made, but read it before you post it. **Never paste `tokens.json`, an
+`access_token`, a `refresh_token`, or an unredacted log** — see
+[Privacy & security](#privacy--security).
 
 ---
 
 ## Troubleshooting
+
+Not listed here? Post the **Share logs** file (see [Community & support](#community--support)) with what you
+did just before it went wrong.
 
 **iOS**
 

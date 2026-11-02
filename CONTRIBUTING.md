@@ -6,7 +6,8 @@ may take a little while, but every issue and PR gets read.
 
 **Good ways to start:**
 
-- **Found a bug?** Open an issue with your device/OS, the port (iOS or Android), and steps to reproduce.
+- **Found a bug?** Open an issue with your device/OS, the port (iOS or Android), steps to reproduce, and the file
+  from the app's **Share logs** button (About screen; on iOS also the start screen).
 - **Small fix?** Send a PR directly — typos, crashes, one-file fixes need no preamble.
 - **Larger change?** Open an issue first so we can agree on the approach before you invest the work —
   especially anything touching the shared `headless/` bridge (see below), the build/CI, or upstream RuneLite

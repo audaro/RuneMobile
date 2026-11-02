@@ -91,6 +91,19 @@ typedef NS_ENUM(NSInteger, RMJitScriptCheck) {
 /// any legacy Documents/tokens.json into Application Support (and purges the exposed copy). Any thread.
 + (NSString *)tokensPath;
 
+/// Where this build keeps its logs: Documents in Debug (Files/USB-exposed, for off-device pulls), the sandboxed
+/// Application Support dir in Release. hello-shell.log, crash.log and the VM's hs_err_pid*.log land here.
++ (NSString *)appLogDir;
+
+/// YES once JNI_CreateJavaVM has returned a VM. Any thread (unlike bridgeReady, which caches the caller's env).
++ (BOOL)vmStarted;
+
+/// "Share logs": DiagnosticsBridge.engineReport(), the JSON {"names":[...],"text":"..."} of the engine's report
+/// section. Runs on a thread of its own and waits at most `seconds`, so a frozen engine can't hang the caller;
+/// `timedOut` says why it came back nil then. nil before the VM is up or on a jar without the method. Call it
+/// off the main thread.
++ (nullable NSString *)engineDiagnosticsJSONWaiting:(NSTimeInterval)seconds timedOut:(BOOL *_Nullable)timedOut;
+
 /// Phase 4 perf probe: YES when a `perfprobe` file is in Documents (tools/perfprobe.sh ios on) and does not say
 /// "off" (devicectl can't delete it, so `off` overwrites it), in either build configuration. Armed, the VM gets -Drunelite.fpsprobe (headless.FrameStats' frame-pacing lines) plus GC and
 /// safepoint logging, the present paths log [presentprobe] (the GL direct present and the PiP frame feed), and a Release build keeps those timing lines,

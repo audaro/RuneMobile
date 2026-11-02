@@ -36,6 +36,17 @@
         android:extractNativeLibs="true"
         android:theme="@style/Theme.AppCompat.NoActionBar">
 
+        <!-- "Share logs": lends the one report file in cache/share-logs/ to the app the player shares it with. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.diagnostics"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/diagnostics_paths" />
+        </provider>
+
         <!-- configChanges: the activity rides out display changes instead of being recreated over the running VM.
              screenLayout matters on foldables: switching panels flips the size class, which would recreate it. -->
         <activity

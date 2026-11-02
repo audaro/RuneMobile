@@ -19,6 +19,7 @@
 #                                                                  — --contract-only stops after this
 #   1c  shellcheck   1d  ktlint   1e  detekt                       — each fails if the tool is missing
 #   1f  headless bridge unit tests (:client:test --tests net.runelite.client.headless.*)
+#   1g  app unit tests (:app:testDebugUnitTest): the "Share logs" redaction cases
 #   2   :app:assembleRelease (+ verifyNoReleaseSecret / verifyReleaseBootAssets)
 #   2b  signing verification (apksigner certificate fingerprint)  — 2 and 2b are skipped by --skip-build
 #   3   :app:lintRelease
@@ -162,6 +163,13 @@ GRADLEW=(./gradlew --no-daemon --console=plain)
 stage "headless bridge unit tests (:client:test --tests net.runelite.client.headless.*)"
 ( cd "$ROOT" && "${GRADLEW[@]}" :client:test --tests 'net.runelite.client.headless.*' ) \
 	|| fail "headless bridge unit tests"
+
+# ── Stage 1g: app unit tests ──────────────────────────────────────────────────────────────────────────
+# RedactTest: the "Share logs" redaction (Redact.kt) against tools/diagnostics/redaction-cases.txt, the cases the
+# iOS RMRedact.m is checked against in ios/dev-tools/sim-gate.sh. A privacy check (a shared report must not carry a
+# token or the character's name), so like 1f it runs with --skip-build too.
+stage "app unit tests (:app:testDebugUnitTest)"
+( cd "$ANDROID" && "${GRADLEW[@]}" :app:testDebugUnitTest ) || fail "app unit tests"
 
 # ── Stage 2: assembleRelease (PROD-QA-01) ─────────────────────────────────────────────────────────────
 # Self-stages the gitignored boot assets via preBuild, then the in-build guards run: verifyNoReleaseSecret

@@ -13,12 +13,13 @@ how the bridge works, which thread each call runs on, and how to change it safel
 
 | Classes | Methods | JSON keys | System properties |
 |---:|---:|---:|---:|
-| 22 | 249 | 280 | 78 |
+| 23 | 251 | 282 | 78 |
 
 ## Classes
 
 - [`ConfigProfileBridge`](#configprofilebridge): 4 methods, 9 JSON keys
 - [`DeviceHeadlessBoot`](#deviceheadlessboot): 1 method, 7 properties
+- [`DiagnosticsBridge`](#diagnosticsbridge): 2 methods, 2 JSON keys
 - [`GrandExchangeBridge`](#grandexchangebridge): 6 methods, 16 JSON keys
 - [`HeadlessLogin`](#headlesslogin): 2 methods, 14 properties
 - [`HeadlessResize`](#headlessresize): 5 methods, 1 property
@@ -70,6 +71,21 @@ DeviceHeadlessBoot — W1 P3 §6.2 entrypoint: boot real RuneLite headless on th
 - `main(String[] args)` → `void`
 
 **System properties read:** `headless.captureTargetFrames`, `headless.runSeconds`, `runelite.gatecensus`, `runelite.headless.capture.dir`, `runelite.hub`, `runelite.nosafemode`, `runelite.routecgpu`
+
+## `DiagnosticsBridge`
+
+Source: [`runelite-client/src/main/java/net/runelite/client/headless/DiagnosticsBridge.java`](../../runelite-client/src/main/java/net/runelite/client/headless/DiagnosticsBridge.java)
+
+The engine's half of the in-app "Share logs" report, plus a freeze watchdog that leaves a thread dump in `client.log`.
+
+**Methods**
+
+- `engineReport()` → `String`  
+  The engine section of a "Share logs" report, as `{"names":[...],"text":"..."}`. `names` holds the logged-in character's name(s), which the shell removes from the whole report (this text included) before it is shared; `text` is plain text. Safe from any thread.
+- `init(PluginManager pm, Client c)` → `void`  
+  Wired from `HeadlessClientUI` once the plugin manager and client exist; starts the freeze watchdog.
+
+**JSON keys emitted:** `names`, `text`
 
 ## `GrandExchangeBridge`
 

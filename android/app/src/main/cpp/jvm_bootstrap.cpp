@@ -87,6 +87,10 @@ static jmethodID g_midInvokeMenuEntry = nullptr;
 // P2-1 dev panel: JavaBridge.heapStats()->String and devSimulateReconnect(int) — both optional (older jars lack
 // them; the native calls degrade to a no-op / empty string).
 static jmethodID g_midHeapStats = nullptr, g_midSimReconnect = nullptr;
+// "Share logs": DiagnosticsBridge.engineReport (optional; an older jar lacks it). Published by g_diagReady.
+static jclass g_diagCls = nullptr;
+static jmethodID g_midEngineReport = nullptr;
+static std::atomic<bool> g_diagReady{false};
 // FOLD-3 live canvas resize (JavaBridge.requestResize); optional, an older jar just keeps its boot size.
 static jmethodID g_midRequestResize = nullptr;
 // FOLD-4 per-screen zoom (JavaBridge.cameraZoom / setCameraZoom); optional, an older jar keeps one zoom.
@@ -740,6 +744,19 @@ static bool publishBridge(JNIEnv *env) {
     g_midSetCameraZoom = midOpt(env, global, "setCameraZoom", "(I)V");         // FOLD-4 (optional)
     g_bridgeCls = global;   // publish only once fully resolved
     LOGI("bridge: JavaBridge facade published (shiftHeld=%s)", g_midSetShiftHeld ? "on" : "off");
+
+    // "Share logs": DiagnosticsBridge.engineReport, best-effort like the facades below (a miss only drops the
+    // engine section from the report).
+    jclass dg = env->FindClass("net/runelite/client/headless/DiagnosticsBridge");
+    if (dg && !env->ExceptionCheck()) {
+        g_diagCls = (jclass)env->NewGlobalRef(dg);
+        env->DeleteLocalRef(dg);
+        g_midEngineReport = g_diagCls ? midOpt(env, g_diagCls, "engineReport", "()Ljava/lang/String;") : nullptr;
+        g_diagReady.store(g_diagCls && g_midEngineReport, std::memory_order_release);
+    } else {
+        env->ExceptionClear();
+        LOGE("bridge: FindClass DiagnosticsBridge failed (Share logs has no engine section)");
+    }
 
     // A2: MenuPeekBridge is a SEPARATE facade — resolve best-effort so a missing/old one only disables menu-peek
     // (never blocks the render path). It is inert unless -Drunelite.menupeek=true, but the class is always present.
@@ -2081,6 +2098,42 @@ Java_dev_audaro_runemobile_JvmLauncher_nativeHeapStats(JNIEnv *artEnv, jobject) 
     if (r)
         hs->DeleteLocalRef(r);
     return artEnv->NewStringUTF(out.c_str());
+}
+// "Share logs": DiagnosticsBridge.engineReport() as {"names":[...],"text":"..."}; "" before the VM is up or on an
+// older jar. DiagnosticsReport.kt calls it on a thread made for the call, with a time limit, so this attaches that
+// thread to HotSpot and detaches it again before it ends. The text crosses as UTF-16 (GetStringChars/NewString), so
+// an emoji in a plugin or thread name arrives intact.
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_audaro_runemobile_JvmLauncher_nativeEngineDiagnostics(JNIEnv *artEnv, jobject) {
+    JavaVM *vm = g_vm.load(std::memory_order_acquire);
+    if (!vm || !g_diagReady.load(std::memory_order_acquire))
+        return artEnv->NewStringUTF("");
+    JNIEnv *hs = nullptr;
+    bool attachedHere = false;
+    jint r = vm->GetEnv((void **)&hs, JNI_VERSION_21);
+    if (r == JNI_EDETACHED) {
+        if (vm->AttachCurrentThreadAsDaemon(&hs, nullptr) != JNI_OK || !hs)
+            return artEnv->NewStringUTF("");
+        attachedHere = true;
+    } else if (r != JNI_OK || !hs) {
+        return artEnv->NewStringUTF("");
+    }
+    jstring js = (jstring)hs->CallStaticObjectMethod(g_diagCls, g_midEngineReport);
+    jstring out = nullptr;
+    if (js && !hs->ExceptionCheck()) {
+        const jchar *chars = hs->GetStringChars(js, nullptr);
+        if (chars) {
+            out = artEnv->NewString(chars, hs->GetStringLength(js));
+            hs->ReleaseStringChars(js, chars);
+        }
+    }
+    if (hs->ExceptionCheck())
+        hs->ExceptionClear();
+    if (js)
+        hs->DeleteLocalRef(js);
+    if (attachedHere)
+        vm->DetachCurrentThread();
+    return out ? out : artEnv->NewStringUTF("");
 }
 // P2-1 dev panel: exercise the headless auto-reconnect path (drops + re-establishes the session) for N seconds,
 // so the native "Reconnecting…" overlay can be verified without a real network loss. No-op on an older jar.

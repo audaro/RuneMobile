@@ -14,6 +14,15 @@ as "What's new".
 
 ## [Unreleased]
 
+### Added
+- **Share logs, for bug reports.** One tap makes a text file to post with a report, and the phone's share sheet
+  sends it to Discord, Messages or Files. It holds the app and device versions, the renderer, your plugins and
+  their versions, recent log lines from the app and from RuneLite, and any crash report. Login tokens, emails
+  and your character name are taken out before the file is made. Find it on the About screen; on iPhone also at
+  the top right of the start screen, and on Android on the "game stopped" card.
+- **A frozen game leaves a trail.** If the game stops moving for 20 seconds, RuneLite's log records what every
+  thread was doing, so Share logs can show what it was stuck on after you restart the app.
+
 ## [0.7.0] - 2026-11-01
 
 ### Added

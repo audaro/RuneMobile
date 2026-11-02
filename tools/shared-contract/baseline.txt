@@ -81,6 +81,8 @@ METHOD ConfigProfileBridge#init(ConfigManager,ProfileManager,ClientThread) -> vo
 METHOD ConfigProfileBridge#isAvailable() -> boolean
 METHOD ConfigProfileBridge#switchProfile(long) -> String
 METHOD DeviceHeadlessBoot#main(String[]) -> void
+METHOD DiagnosticsBridge#engineReport() -> String
+METHOD DiagnosticsBridge#init(PluginManager,Client) -> void
 METHOD GrandExchangeBridge#getGeJson() -> String
 METHOD GrandExchangeBridge#init(PluginManager,ClientThread) -> void
 METHOD GrandExchangeBridge#isAvailable() -> boolean
@@ -334,6 +336,8 @@ PAYLOAD ConfigProfileBridge name
 PAYLOAD ConfigProfileBridge ok
 PAYLOAD ConfigProfileBridge profiles
 PAYLOAD ConfigProfileBridge sync
+PAYLOAD DiagnosticsBridge names
+PAYLOAD DiagnosticsBridge text
 PAYLOAD GrandExchangeBridge available
 PAYLOAD GrandExchangeBridge buy
 PAYLOAD GrandExchangeBridge history

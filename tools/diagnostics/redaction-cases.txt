@@ -1,0 +1,65 @@
+# Cases for the "Share logs" redaction, shared by both ports so they remove the same things:
+#   iOS:     ios/dev-tools/diagnostics/test-redaction.sh (RMRedact.m, built for the Mac)
+#   Android: android/app/src/test/.../RedactTest.kt (Redact.kt), run by the release gate
+# Header lines set what the shell knows when it builds a report:
+#   @name    a character name (from tokens.json and the engine) -> <player>
+#   @secret  a literal value from tokens.json (session, character id, tokens) -> <redacted>
+# Then pairs: "< input line" and "> the line after redaction". A line with nothing to remove comes back unchanged.
+@name Iron Man
+@name Quillfeather
+@secret 7f3c2a91d0e4b5a6
+@secret 1234567890123
+
+# Literal secrets, wherever they sit
+< 2026-11-01 17:02:11 PST [Client] INFO  n.r.c.Foo - resumed session 7f3c2a91d0e4b5a6 ok
+> 2026-11-01 17:02:11 PST [Client] INFO  n.r.c.Foo - resumed session <redacted> ok
+< character 1234567890123 chosen
+> character <redacted> chosen
+
+# Character names: case and the space/underscore/hyphen OSRS treats as one, whole words only
+< Logged in as Iron Man on world 420
+> Logged in as <player> on world 420
+< iron_man: Selling 100 lobsters
+> <player>: Selling 100 lobsters
+< IRON-MAN and Iron Manly and Quillfeather's bank
+> <player> and Iron Manly and <player>'s bank
+< QuillfeatherFan is someone else
+> QuillfeatherFan is someone else
+
+# JSON web tokens and bearer headers
+< refresh with eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlLXZhbHVl now
+> refresh with <token> now
+< Authorization: Bearer abcDEF123456789xyz
+> Authorization: <redacted> <token>
+
+# Query strings in logged URLs (sign-in redirects carry one-time codes)
+< GET https://account.example.com/callback?code=Abc123xyz&state=qwerty1&lang=en 302
+> GET https://account.example.com/callback?code=<redacted>&state=<redacted>&lang=en 302
+
+# key=value and "key":"value" secrets
+< JX_ACCESS_TOKEN=abcdef123456 JX_SESSION_ID=zzzz9999
+> JX_ACCESS_TOKEN=<redacted> JX_SESSION_ID=<redacted>
+< {"access_token":"opaque-1234","refresh_token": "opaque-5678","expires_in":3600}
+> {"access_token":"<redacted>","refresh_token": "<redacted>","expires_in":3600}
+< [jx] JX_* set: displayName=set characterId=set session=7f3c2a… access=set refresh=set
+> [jx] JX_* set: displayName=set characterId=set session=<redacted> access=set refresh=set
+< password: hunter22 apiKey=k-123456 sessionId=abcd1234
+> password: <redacted> apiKey=<redacted> sessionId=<redacted>
+
+# Emails and UUIDs
+< RuneLite account player.one+osrs@example.co.uk signed in
+> RuneLite account <email> signed in
+< session 123e4567-e89b-12d3-a456-426614174000 created
+> session <uuid> created
+
+# Things that must survive: stack frames with module versions, versions, addresses, hub builds
+< 	at java.base@21.0.4/java.lang.Thread.run(Thread.java:1583)
+> 	at java.base@21.0.4/java.lang.Thread.run(Thread.java:1583)
+< RuneLite 1.13.5-SNAPSHOT | LOGGED_IN | world 420 | heap 512/1024 MB
+> RuneLite 1.13.5-SNAPSHOT | LOGGED_IN | world 420 | heap 512/1024 MB
+< [jvm] JIT handover: brk#0x69 size=0x4000000 -> RX 0x10a8f0000 kr=0 (1 request(s)); handler disarmed
+> [jvm] JIT handover: brk#0x69 size=0x4000000 -> RX 0x10a8f0000 kr=0 (1 request(s)); handler disarmed
+<   Flipping Copilot (flipping-copilot) v1.8.2 build 1a2b3c4d | on
+>   Flipping Copilot (flipping-copilot) v1.8.2 build 1a2b3c4d | on
+< net.runelite.client.account.SessionManager - No session file exists
+> net.runelite.client.account.SessionManager - No session file exists

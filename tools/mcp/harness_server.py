@@ -372,7 +372,7 @@ def parse_fps_measure(text):
 _SIM_DRAWS = re.compile(r"\[boot\] poll \d+ms\s+draws=(\d+) nullGraphics=(\d+) frames=\d+ state=(\w+)")
 _SIM_CAPTURE = re.compile(r"\[headless-capture\] draw#(\d+) nullGraphics=(\d+) capturedFrames=\d+ state=(\w+)")
 _SIM_TRANSITION = re.compile(r"\[headless-capture\] gameState \w+ -> (\w+)")
-_SIM_FATAL = re.compile(r"\bFATAL\b|A fatal error has been detected|hs_err_pid")
+_SIM_FATAL = re.compile(r"\bFATAL\b|A fatal error has been detected|An error report file with more information is saved")
 
 
 def parse_sim_progress(text):

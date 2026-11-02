@@ -1,4 +1,5 @@
 #import "AboutViewController.h"
+#import "RMDiagnostics.h"
 
 // Modelled on the MUISetChooser full-screen-modal pattern (dark background, bold title top-leading, amber Done
 // top-trailing, scroll area below). The four disclosure sections use copy verbatim from Android's AboutScreen
@@ -80,6 +81,18 @@
                      @"This app bundles no Jagex art assets: the mobile chrome draws those interface sprites from "
                      @"your own live game cache at runtime - the same way the upstream RuneLite client does - so "
                      @"the art is never redistributed."];
+    [self addSection:stack
+               title:@"Report a problem"
+                body:@"Share logs makes a text file to post with your bug report. Login tokens, emails and your "
+                     @"character name are taken out first."];
+    UIButton *shareLogs = [UIButton buttonWithType:UIButtonTypeSystem];
+    [shareLogs setTitle:@"Share logs" forState:UIControlStateNormal];
+    shareLogs.titleLabel.font = [UIFont boldSystemFontOfSize:15];
+    shareLogs.tintColor = [UIColor colorWithRed:1.0 green:0.78 blue:0.20 alpha:1.0];
+    shareLogs.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeading;
+    [shareLogs addTarget:self action:@selector(onShareLogs:) forControlEvents:UIControlEventTouchUpInside];
+    [stack setCustomSpacing:6 afterView:stack.arrangedSubviews.lastObject];
+    [stack addArrangedSubview:shareLogs];
 
     UILayoutGuide *sg = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
@@ -133,6 +146,10 @@
     [stack addArrangedSubview:head];
     [stack setCustomSpacing:4 afterView:head];
     [stack addArrangedSubview:text];
+}
+
+- (void)onShareLogs:(UIButton *)sender {
+    [RMDiagnostics shareFrom:self sourceView:sender];
 }
 
 - (void)onDone {

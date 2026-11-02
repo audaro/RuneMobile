@@ -1,0 +1,11 @@
+# What the "Share logs" account walk (iOS RMRedact collectAccount, Android Redact.collectAccount) must take from
+# tokens-sample.json: every name and secret value, at any depth, and nothing else. Compared as sets.
+name Iron Man
+name Quillfeather
+name Ash Wren
+secret 3f9c1e7a-55b2-4c0d-9e8f-1a2b3c4d5e6f
+secret 100200300400
+secret 100200300401
+secret 100200300402
+secret a1b2c3d4e5f6a7b8c9d0
+secret 998877665544
