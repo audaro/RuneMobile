@@ -360,6 +360,40 @@ public class JavaBridgePressTimingTest
 	}
 
 	/** A {@link ClientThread} that runs its work inline, so the tap ingress resolves within the test thread. */
+	/**
+	 * The world list picks the row its last draw found under the cursor, so the click has to wait for a draw after
+	 * the move. Posted together, tapping a world chose the row under the previous tap.
+	 */
+	@Test
+	public void aLoginScreenClickWaitsForADrawAfterItsMove() throws Exception
+	{
+		when(client.getGameState()).thenReturn(net.runelite.api.GameState.LOGIN_SCREEN);
+		final List<java.util.function.BooleanSupplier> drain = new ArrayList<>();
+		final ClientThread ct = mock(ClientThread.class);
+		doAnswer(inv ->
+		{
+			drain.add(inv.getArgument(0));
+			return null;
+		}).when(ct).invokeLater(any(java.util.function.BooleanSupplier.class));
+		JavaBridge.setClientThread(ct);
+
+		JavaBridge.onClick(TAP_X, TAP_Y, MouseEvent.BUTTON1);
+		pump();
+		assertEquals("the cursor moves at once", TAP_X, cap.last(MouseEvent.MOUSE_MOVED).getX());
+		assertEquals("one deferred click", 1, drain.size());
+
+		assertFalse("first drain: the engine has not drawn yet", drain.get(0).getAsBoolean());
+		assertFalse("second drain: one draw is not known to be finished", drain.get(0).getAsBoolean());
+		pump();
+		assertEquals(0, cap.count(MouseEvent.MOUSE_PRESSED));
+
+		assertTrue("third drain: the click goes out", drain.get(0).getAsBoolean());
+		pump();
+		assertEquals(TAP_X, cap.first(MouseEvent.MOUSE_PRESSED).getX());
+		assertEquals(TAP_Y, cap.first(MouseEvent.MOUSE_PRESSED).getY());
+		assertEquals(1, cap.count(MouseEvent.MOUSE_RELEASED));
+	}
+
 	private static ClientThread inlineClientThread()
 	{
 		final ClientThread ct = mock(ClientThread.class);

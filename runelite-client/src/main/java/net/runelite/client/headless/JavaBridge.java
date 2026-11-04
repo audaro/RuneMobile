@@ -264,6 +264,8 @@ public final class JavaBridge
 	private static final int MAX_SETTLE = Integer.getInteger("runelite.touch.settleMax", 12);
 	private static final int STABLE_NEEDED = Integer.getInteger("runelite.touch.settleStable", 2);
 	private static final int CLICKED_TIMEOUT = Integer.getInteger("runelite.touch.clickTimeout", 10);
+	// Client-thread drains between the move and the click on the login screen: enough for a full draw between them.
+	private static final int LOGIN_CLICK_DRAINS = 3;
 	private static boolean truthSubscribed;  // EventBus registration is one-shot (client thread)
 
 	// Published complete frames for the live blit. The native side reads at the display refresh (up to
@@ -927,7 +929,33 @@ public final class JavaBridge
 			ct.invoke(() -> startRightClick(canvas, ct, c, x, y));
 			return;
 		}
+		if (button == MouseEvent.BUTTON1 && ct != null && c != null && c.getGameState() == GameState.LOGIN_SCREEN)
+		{
+			clickOnLoginScreen(canvas, ct, x, y);
+			return;
+		}
 		synthesizeClick(canvas, x, y, button);
+	}
+
+	/**
+	 * Move to {@code (x,y)}, then click there once the engine has drawn with the cursor in place. The world list
+	 * picks the row its last draw found under the cursor and ignores where the click itself landed, so a click
+	 * posted with its move chose the row under the previous tap: tapping any world after "Click to switch" picked
+	 * whichever one sat under that button. Client-thread drains run once a frame, so the wait is a few frames.
+	 */
+	private static void clickOnLoginScreen(Canvas canvas, ClientThread ct, int x, int y)
+	{
+		postMove(canvas, x, y);
+		final int[] drains = {0};
+		ct.invokeLater(() ->
+		{
+			if (++drains[0] < LOGIN_CLICK_DRAINS)
+			{
+				return false;
+			}
+			postClickButtons(canvas, x, y, MouseEvent.BUTTON1);
+			return true;
+		});
 	}
 
 	/**
