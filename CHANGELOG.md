@@ -20,6 +20,10 @@ as "What's new".
   "Use last world". Reconnecting after a dropped connection and hopping worlds are still automatic.
 - **Auto-login is a setting now.** Turn it on in Game settings and the game presses Play Now for you when it starts,
   on the Default World plugin's world. It's off by default, and logging out always leaves you at the login screen.
+- **The orbs follow the game's Show data orbs setting.** With it off, the app used to draw the orbs anyway, and they
+  looked alive but tapping them did nothing. They're hidden now, as they are on desktop, and a chat message at login
+  says where to turn them on: All Settings, Interfaces. The world map button is one of the orbs, so it needs the
+  setting too.
 
 ### Fixed
 - **The RuneLite profile you pick stays picked.** It used to go back to the old one at every launch.
