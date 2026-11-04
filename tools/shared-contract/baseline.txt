@@ -20,6 +20,7 @@ FLAG runelite.headless.autologin.eula.loginIndex
 FLAG runelite.headless.autologin.eula.point
 FLAG runelite.headless.autologin.legacy
 FLAG runelite.headless.autologin.loginIndex
+FLAG runelite.headless.autologin.manual
 FLAG runelite.headless.autologin.maxAttempts
 FLAG runelite.headless.autologin.point
 FLAG runelite.headless.autologin.warmup

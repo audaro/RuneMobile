@@ -425,7 +425,7 @@ over adb and prints a verdict; most need a Debug build. Read the README before r
 
 | Directory | Script | Checks |
 |---|---|---|
-| [`a0-login`](../../android/dev-tools/a0-login/README.md) | `check-loggedin.sh` | autologin to `LOGGED_IN` from a pushed `tokens.json` |
+| [`a0-login`](../../android/dev-tools/a0-login/README.md) | `check-loggedin.sh` | autologin to `LOGGED_IN` from a pushed `tokens.json` + `autologin.mode` marker (debug builds) |
 | [`a1-input`](../../android/dev-tools/a1-input/README.md) | `check-input.sh` | input parity with the bridge |
 | [`a1b-gatecensus`](../../android/dev-tools/a1b-gatecensus/README.md) | `check-gates.sh` | the bridge gates resolve on device (`ANDROID_GATE_CENSUS_GREEN`) |
 | [`a2-menupeek`](../../android/dev-tools/a2-menupeek/README.md) | `check-menupeek.sh` | the long-press menu |

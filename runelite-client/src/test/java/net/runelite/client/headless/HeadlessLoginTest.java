@@ -37,6 +37,7 @@ import org.junit.Before;
 import org.junit.Test;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -59,13 +60,15 @@ import static org.mockito.Mockito.when;
  *       give-up — because {@code tickLegacy} only understands loginIndex 0/2 and returned first.</li>
  *   <li><b>World-hop re-arm/cancel</b>: {@code requestWorldHop} re-arms a relogin into the target world
  *       (changeWorld on the login screen), {@code cancelWorldHop} restores idle without stranding state.</li>
+ *   <li><b>Manual mode</b>: the login screen belongs to the player, relogs after a drop or for a hop still run, and
+ *       repeated failed logins still reach the expired card.</li>
  * </ul>
  * Pure: {@link Client} is mocked, the canvas is a bare headless AWT {@link Canvas} (the synthesized clicks go
  * to the toolkit EventQueue and are simply never dispatched). All login state is static, so every test starts
  * from {@link HeadlessLogin#resetForTest()}; the {@code -D} config (enable flag, shortened warmup/cooldown) is
  * set in the static initialiser before the class loads — reliable because no other test in the module touches
- * HeadlessLogin. Legacy mode is flipped per-test via {@link HeadlessLogin#setLegacyEnabledForTest} since the
- * property is read once at clinit.
+ * HeadlessLogin. Legacy and manual mode are flipped per-test via {@link HeadlessLogin#setLegacyEnabledForTest} and
+ * {@link HeadlessLogin#setManualForTest} since those properties are read once at clinit.
  */
 public class HeadlessLoginTest
 {
@@ -84,6 +87,8 @@ public class HeadlessLoginTest
 	private static final int TRYAGAIN_EXHAUST_TICKS = 130;
 	private static final int WELCOME_LOGIN_INDEX = 10;
 	private static final int RECONNECT_LOGIN_INDEX = 9;
+	private static final int EULA_LOGIN_INDEX = 12;
+	private static final int MEMBERS_WORLD_LOGIN_INDEX = 34;
 
 	private final Canvas canvas = new Canvas();
 	private Client client;
@@ -318,5 +323,205 @@ public class HeadlessLoginTest
 		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, PLAY_EXHAUST_TICKS);
 		verify(client, never()).changeWorld(any(World.class));
 		assertFalse("a cancelled hop must not decay into a give-up", HeadlessLogin.hasGivenUp());
+	}
+
+	/** A login the player starts: their own Play Now, through LOGGING_IN, into a world whose scene draws. */
+	private void logInByHand()
+	{
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, 5);
+		tickN(GameState.LOGGING_IN, -1, 2);
+		HeadlessLogin.noteSceneDraw();
+		tickN(GameState.LOGGED_IN, -1, 1);
+		assertFalse(HeadlessLogin.hasGivenUp());
+		assertFalse(HeadlessLogin.isReconnecting());
+		clearInvocations(client);
+	}
+
+	/** One failed login: Play Now, then the engine puts the client back on the login screen at {@code landsOn}. */
+	private void failedLogin(int landsOn)
+	{
+		tickN(GameState.LOGGING_IN, -1, 2);
+		tickN(GameState.LOGIN_SCREEN, landsOn, 2);
+	}
+
+	/**
+	 * The headline: nothing in the automated stages happens on its own. Every one of them needs the canvas to
+	 * click, so never asking for it means no EULA Accept, no Try Again and no Play Now.
+	 */
+	@Test
+	public void manualLeavesTheLoginScreenToThePlayer()
+	{
+		HeadlessLogin.setManualForTest(true);
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, PLAY_EXHAUST_TICKS);
+		tickN(GameState.LOGIN_SCREEN, EULA_LOGIN_INDEX, PLAY_EXHAUST_TICKS);
+		tickN(GameState.LOGIN_SCREEN, RECONNECT_LOGIN_INDEX, TRYAGAIN_EXHAUST_TICKS);
+		verify(client, never()).getCanvas();
+		assertFalse("an unattended login screen is not a failed login", HeadlessLogin.hasGivenUp());
+	}
+
+	@Test
+	public void manualStillDismissesTheWelcomeScreenAfterThePlayersLogin()
+	{
+		HeadlessLogin.setManualForTest(true);
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, 5);
+		tickN(GameState.LOGGING_IN, -1, 2);
+
+		final Widget play = mock(Widget.class);
+		when(play.getBounds()).thenReturn(new Rectangle(472, 292, 229, 90));
+		when(client.getWidget(InterfaceID.WelcomeScreen.PLAY)).thenReturn(play);
+		tickN(GameState.LOGGED_IN, -1, 5);
+		verify(play, atLeastOnce()).getBounds();
+	}
+
+	/** A deliberate logout must leave the next login just like the first: the welcome screen is dismissed again. */
+	@Test
+	public void manualLogoutRearmsTheWelcomeDismiss()
+	{
+		HeadlessLogin.setManualForTest(true);
+		logInByHand();
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, PLAY_EXHAUST_TICKS);
+		verify(client, never()).getCanvas();
+		assertFalse("a logout is not a drop", HeadlessLogin.isReconnecting());
+		tickN(GameState.LOGGING_IN, -1, 2);
+
+		final Widget play = mock(Widget.class);
+		when(play.getBounds()).thenReturn(new Rectangle(472, 292, 229, 90));
+		when(client.getWidget(InterfaceID.WelcomeScreen.PLAY)).thenReturn(play);
+		tickN(GameState.LOGGED_IN, -1, 5);
+		verify(play, atLeastOnce()).getBounds();
+	}
+
+	@Test
+	public void manualStillRecoversADroppedConnection()
+	{
+		HeadlessLogin.setManualForTest(true);
+		logInByHand();
+		tickN(GameState.CONNECTION_LOST, -1, 1);
+		tickN(GameState.LOGIN_SCREEN, RECONNECT_LOGIN_INDEX, 3);
+		assertTrue(HeadlessLogin.isReconnecting());
+		verify(client, atLeastOnce()).getCanvas();
+
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, 5);
+		HeadlessLogin.noteSceneDraw();
+		tickN(GameState.LOGGED_IN, -1, 1);
+		assertFalse(HeadlessLogin.isReconnecting());
+		assertFalse(HeadlessLogin.hasGivenUp());
+		verify(client, never()).changeWorld(any(World.class));
+	}
+
+	/**
+	 * A drop before {@code done} latched, on the post-login welcome screen. Nothing would own that login screen in
+	 * manual mode, and the snapshot would show "Reconnecting..." forever, so the drop must re-arm as usual.
+	 */
+	@Test
+	public void manualRecoversADropOnTheWelcomeScreen()
+	{
+		HeadlessLogin.setManualForTest(true);
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, 5);
+		tickN(GameState.LOGGED_IN, -1, 2);   // no scene draw: still on the welcome screen
+		clearInvocations(client);
+
+		tickN(GameState.CONNECTION_LOST, -1, 1);
+		tickN(GameState.LOGIN_SCREEN, RECONNECT_LOGIN_INDEX, 3);
+		assertTrue(HeadlessLogin.isReconnecting());
+		verify(client, atLeastOnce()).getCanvas();
+	}
+
+	/** The engine rode the drop out itself, so the logout that follows much later is a plain logout. */
+	@Test
+	public void manualDoesNotRememberADropTheEngineRecovered()
+	{
+		HeadlessLogin.setManualForTest(true);
+		logInByHand();
+		tickN(GameState.CONNECTION_LOST, -1, 1);
+		tickN(GameState.LOGGED_IN, -1, 1);
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, PLAY_EXHAUST_TICKS);
+		assertFalse(HeadlessLogin.isReconnecting());
+		verify(client, never()).getCanvas();
+	}
+
+	@Test
+	public void manualStillFinishesAWorldHop()
+	{
+		final World world = mock(World.class);
+		when(client.createWorld()).thenReturn(world);
+
+		HeadlessLogin.setManualForTest(true);
+		logInByHand();
+		HeadlessLogin.requestWorldHop(316, "oldschool16.runescape.com", false);
+		tickN(GameState.LOGGED_IN, -1, 3);
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, 5);
+		verify(world).setId(316);
+		verify(client).changeWorld(world);
+		verify(client, atLeastOnce()).getCanvas();
+
+		// The hop is over: the next logout is the player's again.
+		HeadlessLogin.noteSceneDraw();
+		tickN(GameState.LOGGED_IN, -1, 1);
+		clearInvocations(client);
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, PLAY_EXHAUST_TICKS);
+		verify(client, never()).getCanvas();
+	}
+
+	/** The "Session expired" card has to stay reachable when no automated budget is left to run out. */
+	@Test
+	public void manualRepeatedFailedLoginsShowTheCard()
+	{
+		HeadlessLogin.setManualForTest(true);
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, 5);
+		failedLogin(RECONNECT_LOGIN_INDEX);
+		failedLogin(WELCOME_LOGIN_INDEX);
+		assertFalse("two failures are not an expired session", HeadlessLogin.hasGivenUp());
+		failedLogin(RECONNECT_LOGIN_INDEX);
+		assertTrue(HeadlessLogin.hasGivenUp());
+		assertFalse(HeadlessLogin.isReconnecting());
+		verify(client, never()).getCanvas();
+	}
+
+	@Test
+	public void manualMembersWorldRefusalIsNotAnExpiredSession()
+	{
+		HeadlessLogin.setManualForTest(true);
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, 5);
+		for (int i = 0; i < 5; i++)
+		{
+			failedLogin(MEMBERS_WORLD_LOGIN_INDEX);
+		}
+		assertFalse(HeadlessLogin.hasGivenUp());
+	}
+
+	@Test
+	public void manualSuccessfulLoginResetsTheFailureCount()
+	{
+		HeadlessLogin.setManualForTest(true);
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, 5);
+		failedLogin(RECONNECT_LOGIN_INDEX);
+		failedLogin(RECONNECT_LOGIN_INDEX);
+		logInByHand();
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, 5);
+		failedLogin(RECONNECT_LOGIN_INDEX);
+		failedLogin(RECONNECT_LOGIN_INDEX);
+		assertFalse(HeadlessLogin.hasGivenUp());
+	}
+
+	/** A reconnect gave up and the player got back in by hand: the next logout must not show that old give-up. */
+	@Test
+	public void manualLoginPastAGiveUpClearsIt()
+	{
+		HeadlessLogin.setManualForTest(true);
+		logInByHand();
+		tickN(GameState.CONNECTION_LOST, -1, 1);
+		tickN(GameState.LOGIN_SCREEN, RECONNECT_LOGIN_INDEX, TRYAGAIN_EXHAUST_TICKS);
+		assertTrue(HeadlessLogin.hasGivenUp());
+
+		tickN(GameState.LOGGING_IN, -1, 2);
+		tickN(GameState.LOGGED_IN, -1, 1);
+		assertFalse(HeadlessLogin.hasGivenUp());
+		clearInvocations(client);
+
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, PLAY_EXHAUST_TICKS);
+		assertFalse(HeadlessLogin.hasGivenUp());
+		assertFalse(HeadlessLogin.isReconnecting());
+		verify(client, never()).getCanvas();
 	}
 }

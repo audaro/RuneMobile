@@ -7,6 +7,7 @@
 #   ios/dev-tools/run-sim.sh --jars          # rebuild + stage the jars first (after a Java change)
 #   ios/dev-tools/run-sim.sh --no-build      # reinstall + relaunch the last simulator build
 #   ios/dev-tools/run-sim.sh --manual        # launch to the Play cover and wait for a click
+#   ios/dev-tools/run-sim.sh --player-login  # log in as a player does: no automatic Play Now, no forced world
 #   ios/dev-tools/run-sim.sh --from-phone    # start from the paired phone's settings (below)
 #   ios/dev-tools/run-sim.sh --desktop-login # log the simulator in with the desktop harness's Jagex session (below)
 #   ios/dev-tools/run-sim.sh --logout        # remove the simulator's Jagex session
@@ -54,6 +55,7 @@ LIVE=Documents/.runelite/jagexcache/oldschool/LIVE
 BUILD=yes
 JARS=no
 AUTOPLAY=YES
+AUTOLOGIN=YES
 FROM_PHONE=no
 LAUNCH=yes
 PRINT_UDID=no
@@ -63,6 +65,7 @@ for a in "$@"; do
     --jars)       JARS=yes ;;
     --no-build)   BUILD=no ;;
     --manual)     AUTOPLAY=NO ;;
+    --player-login) AUTOLOGIN=NO ;;
     --from-phone) FROM_PHONE=yes ;;
     --no-launch)  LAUNCH=no ;;
     --print-udid) PRINT_UDID=yes ;;
@@ -235,7 +238,7 @@ if [ "$LAUNCH" = no ]; then
   exit 0
 fi
 xcrun simctl launch --terminate-running-process "$SIM_UDID" "$BUNDLE_ID" \
-  -rendererPref "$RENDERER" -RMAutoPlay "$AUTOPLAY"
+  -rendererPref "$RENDERER" -RMAutoPlay "$AUTOPLAY" -RMAutoLogin "$AUTOLOGIN"
 
 DOCS="$(xcrun simctl get_app_container "$SIM_UDID" "$BUNDLE_ID" data)/Documents"
 log "Running. Logs: $DOCS/jvm-stdio.log and $DOCS/hello-shell.log"

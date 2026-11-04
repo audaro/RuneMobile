@@ -75,7 +75,9 @@ def main():
             with open(args.tokens, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode()
             driver.push_file(f"/sdcard/Android/data/{PKG}/files/tokens.json", b64)
-            print("[bs] pushed tokens.json -> autologin armed", flush=True)
+            # The app waits for a player to press Play Now unless this marker asks for the unattended login.
+            driver.push_file(f"/sdcard/Android/data/{PKG}/files/autologin.mode", base64.b64encode(b"go\n").decode())
+            print("[bs] pushed tokens.json + autologin.mode -> autologin armed", flush=True)
 
         extras = "--ez census true" if args.mode == "census" else ""
         # UiAutomator2 forwards `optionalIntentArguments` straight to `am start ...`, so this mirrors the

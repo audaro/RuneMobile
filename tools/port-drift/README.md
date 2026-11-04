@@ -50,8 +50,8 @@ rewrite tables before calling a difference a bug.
 The options each port's boot path can pass:
 
 - iOS: `runProbesWithLog:` in `JVMLauncher.m`;
-- Android: `bootJvm` in `MainActivity.kt`, `autologinOpts` in `JagexTokens.kt` and `jvmThreadMain` in
-  `jvm_bootstrap.cpp`.
+- Android: `bootJvm` in `MainActivity.kt`, `loginOpts`, `playerLoginOpts` and `devAutologinOpts` in `JagexTokens.kt`
+  and `jvmThreadMain` in `jvm_bootstrap.cpp`.
 
 Options are compared by key (`-Dname`, `-XX:Name`, `-Xmx`, ...), so `-Dx=1` and `-Dx=2` are one option with two
 values. A value the code builds at run time shows as `{expr}`; Kotlin `const val`s are filled in. The tables are:

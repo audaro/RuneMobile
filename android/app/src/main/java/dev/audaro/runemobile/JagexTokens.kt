@@ -143,17 +143,28 @@ object JagexTokens {
     }
 
     /**
-     * The autologin VM opts armed once JX_* is set, mirroring iOS JVMLauncher.m. Coordinates are the fixed
-     * 765x503 login layout (EULA Accept centre; Play Now centre, desktop-proven); device-tunable via the same
+     * The VM opts that arm HeadlessLogin once JX_* is set, mirroring iOS JVMLauncher.m. Coordinates are the fixed
+     * 765x503 login layout (Play Now centre, desktop-proven); device-tunable via the same
      * runelite.headless.autologin.* properties if a real device's login frame differs.
      */
-    val autologinOpts: Array<String> =
+    val loginOpts: Array<String> =
         arrayOf(
             "-Drunelite.headless.autologin=true",
+            "-Drunelite.headless.autologin.point=382,248",
+        )
+
+    /** The player logs in: the machine only relogs after a dropped connection or for a hop, and clears the welcome. */
+    val playerLoginOpts: Array<String> =
+        arrayOf(
+            "-Drunelite.headless.autologin.manual=true",
+        )
+
+    /** The unattended login the dev gates need: EULA Accept centre, then Play Now on a fixed F2P world. */
+    val devAutologinOpts: Array<String> =
+        arrayOf(
             "-Drunelite.headless.autologin.eula=true",
             "-Drunelite.headless.autologin.eula.point=302,312",
             "-Drunelite.headless.autologin.eula.loginIndex=12",
-            "-Drunelite.headless.autologin.point=382,248",
             "-Drunelite.headless.autologin.world=301",
             "-Drunelite.headless.autologin.worldAddress=oldschool1.runescape.com",
         )

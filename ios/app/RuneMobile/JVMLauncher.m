@@ -2413,20 +2413,15 @@ static void RMEnsureResizableDisplayMode(NSString *rlHome, JVMLogSink log) {
         log([NSString stringWithFormat:@"[jvm] xms marker \"%@\" ignored (needs a size up to %ldm, e.g. 384m)", xms, kMaxHeapMb]);
     }
 
-    // Phase 4 sub-goal A — interactive login, purely in-process (no native touch bridge). Map the JX_*
-    // launcher handoff from tokens.json (Application Support), then arm HeadlessLogin's two-stage click
-    // machine (EULA Accept -> Play Now). Only arms when a usable token set is present, so a build with no
+    // Map the JX_* launcher handoff from tokens.json (Application Support), which puts the login screen on Play
+    // Now, then arm HeadlessLogin. The player logs in: the machine only relogs after a dropped connection or for a
+    // world hop, and clears the welcome screen. Only arms when a usable token set is present, so a build with no
     // tokens.json pushed still does the proven §6.2 login-screen render.
     BOOL autologin = loadJagexTokens(log);
     if (autologin) {
         [opts addObjectsFromArray:@[
             @"-Drunelite.headless.autologin=true",
-            @"-Drunelite.headless.autologin.eula=true",
-            @"-Drunelite.headless.autologin.eula.point=302,312", // EULA Accept centre (765x503 device frame)
-            @"-Drunelite.headless.autologin.eula.loginIndex=12", // observed EULA sub-state on device
-            @"-Drunelite.headless.autologin.point=382,248",      // Play Now centre (desktop-proven)
-            @"-Drunelite.headless.autologin.world=301",          // F2P world (throwaway account)
-            @"-Drunelite.headless.autologin.worldAddress=oldschool1.runescape.com",
+            @"-Drunelite.headless.autologin.point=382,248", // Play Now centre (desktop-proven)
             // Play Now only crosses LOGIN_SCREEN -> LOGGED_IN; the gamepack then PARKS on the post-login
             // "Welcome to Gielinor / Click here to play" screen with the world NOT yet per-frame-rendered
             // (viewport 0x0, topLevelIf 165). HeadlessLogin clicks the real WelcomeScreen.PLAY widget bounds
@@ -2434,7 +2429,20 @@ static void RMEnsureResizableDisplayMode(NSString *rlHome, JVMLogSink log) {
             // drives the scene render (the black-3D-scene blocker; see
             // ios/dev-tools/gpu-routec/BLACK-SCENE-DIAGNOSIS.md).
         ]];
-        log(@"[jvm] autologin ARMED: EULA 302,312 (idx 12) -> Play Now 382,248 -> Click here to play (enter world), world 301/oldschool1");
+        // -RMAutoLogin YES: the unattended login the dev tooling needs (run-sim.sh passes it by default).
+        if ([[NSUserDefaults standardUserDefaults] boolForKey:@"RMAutoLogin"]) {
+            [opts addObjectsFromArray:@[
+                @"-Drunelite.headless.autologin.eula=true",
+                @"-Drunelite.headless.autologin.eula.point=302,312", // EULA Accept centre (765x503 device frame)
+                @"-Drunelite.headless.autologin.eula.loginIndex=12", // observed EULA sub-state on device
+                @"-Drunelite.headless.autologin.world=301",          // F2P world (throwaway account)
+                @"-Drunelite.headless.autologin.worldAddress=oldschool1.runescape.com",
+            ]];
+            log(@"[jvm] dev autologin ARMED: EULA 302,312 (idx 12) -> Play Now 382,248 -> Click here to play, world 301/oldschool1");
+        } else {
+            [opts addObject:@"-Drunelite.headless.autologin.manual=true"];
+            log(@"[jvm] login armed: the player presses Play Now; relogs and the welcome screen stay automatic");
+        }
     }
 
     JavaVMOption *vmopts = (JavaVMOption *)calloc(opts.count, sizeof(JavaVMOption));

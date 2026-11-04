@@ -51,7 +51,9 @@ BOOT_PATH = {
     "ios": [("ios/app/RuneMobile/JVMLauncher.m", r"^- \(int\)runProbesWithLog:", "{", "runProbesWithLog:")],
     "android": [
         ("android/app/src/main/java/dev/audaro/runemobile/MainActivity.kt", r"\bfun bootJvm\(", "{", "bootJvm"),
-        ("android/app/src/main/java/dev/audaro/runemobile/JagexTokens.kt", r"\bval autologinOpts\b", "(", "autologinOpts"),
+        ("android/app/src/main/java/dev/audaro/runemobile/JagexTokens.kt", r"\bval loginOpts\b", "(", "loginOpts"),
+        ("android/app/src/main/java/dev/audaro/runemobile/JagexTokens.kt", r"\bval playerLoginOpts\b", "(", "playerLoginOpts"),
+        ("android/app/src/main/java/dev/audaro/runemobile/JagexTokens.kt", r"\bval devAutologinOpts\b", "(", "devAutologinOpts"),
         ("android/app/src/main/cpp/jvm_bootstrap.cpp", r"^static void \*jvmThreadMain\(", "{", "jvmThreadMain"),
     ],
 }
@@ -343,7 +345,9 @@ def port_sources(port):
 
 def options_of(port):
     """{key: [(value, where)]} for the boot path, and [(option, where, function)] for options elsewhere."""
-    boot = {REPO / f: (decl, opener) for f, decl, opener, _name in BOOT_PATH[port]}
+    boot = {}  # a file can hold several declarations on the path
+    for f, decl, opener, _name in BOOT_PATH[port]:
+        boot.setdefault(REPO / f, []).append((decl, opener))
     for f in boot:
         if not f.is_file():
             raise InputError(f"missing {rel(f)}")
@@ -353,7 +357,7 @@ def options_of(port):
         kotlin = f.suffix in (".kt", ".kts")
         nostr, strings = lex(src, kotlin)
         consts = kotlin_consts(src) if kotlin else {}
-        span = scope(src, nostr, *boot[f], rel(f)) if f in boot else None
+        spans = [scope(src, nostr, decl, opener, rel(f)) for decl, opener in boot.get(f, ())]
         for start, end, text in strings:
             if not OPTION.fullmatch(text):
                 continue
@@ -368,7 +372,7 @@ def options_of(port):
                     or re.search(r"\bstrn?cmp\s*\([^()]*$", before)):
                 compared.append(where)  # the code tests for this option; it doesn't pass it
                 continue
-            if span and span[0] <= start < span[1]:
+            if any(first <= start < last for first, last in spans):
                 key, value = option_key(opt)
                 found.setdefault(key, []).append((value, where))
             else:

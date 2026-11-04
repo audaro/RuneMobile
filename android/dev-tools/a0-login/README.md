@@ -1,13 +1,15 @@
 # A0 — autologin to LOGGED_IN
 
 GREEN gate for Phase A0 (see `android/PORT-PHASING.md`): from a pushed `tokens.json` (the JX_* launcher
-handoff) with **no manual taps**, the engine drives `gameState` all the way to `LOGGED_IN`.
+handoff) and an `autologin.mode` marker, with **no manual taps**, the engine drives `gameState` all the way to
+`LOGGED_IN`. Without the marker the app waits for a player to press Play Now, as a release build always does.
 
 ## How it works
 `JagexTokens.kt` locates `tokens.json`, sets `JX_SESSION_ID` / `JX_CHARACTER_ID` / `JX_DISPLAY_NAME` /
 `JX_ACCESS_TOKEN` / `JX_REFRESH_TOKEN` via the native `nativeSetEnv` bridge **before** `JNI_CreateJavaVM`
 (HotSpot snapshots the environment at startup), then `MainActivity` appends the `runelite.headless.autologin.*`
-opts. `HeadlessLogin` (already in the shared jar) clicks EULA→Play Now and selects the world.
+opts. `HeadlessLogin` (already in the shared jar) clicks EULA→Play Now and selects the world. The EULA, Play Now and
+world opts are the marker's; a run without it gets `.manual` instead.
 
 ## tokens.json (secret — never committed)
 Minted with `ios/dev-tools/fetch-shield-tokens.sh` (throwaway Jagex account only). The **same** `tokens.json`
@@ -17,6 +19,7 @@ the app's files dir (debug build):
 ```
 adb shell mkdir -p /sdcard/Android/data/dev.audaro.runemobile/files
 adb push ios/dev-tools/tokens.json /sdcard/Android/data/dev.audaro.runemobile/files/tokens.json
+adb shell touch /sdcard/Android/data/dev.audaro.runemobile/files/autologin.mode
 ```
 
 `JagexTokens` checks the internal `filesDir` first, then this external dir. No `tokens.json` → login-screen

@@ -214,10 +214,11 @@ From `DeviceHeadlessBoot.main` on, both ports run the same code:
    cache lives under `user.home/.runelite/jagexcache/oldschool/LIVE`.
 3. The engine starts drawing. Each `Hooks.draw` runs the bridge ticks; each post-composite copies the frame
    out, and the shell's next tick picks it up.
-4. With the `JX_*` session present, the gamepack authenticates but stops on the "Play Now" welcome screen.
-   `HeadlessLogin` (armed by `-Drunelite.headless.autologin`) clicks it, and on a fresh install clicks the
-   EULA's Accept first. After login it also dismisses the game's "Click here to play" screen, and the HUD
-   bridges take over.
+4. With the `JX_*` session present, the gamepack authenticates but stops on the "Play Now" welcome screen, and
+   the player presses it. `HeadlessLogin` (armed by `-Drunelite.headless.autologin`) then dismisses the game's
+   "Click here to play" screen, and the HUD bridges take over. It relogs by itself only after a dropped
+   connection or for a world hop. Without `.manual`, as on the desktop harness, it also clicks Play Now, and on a
+   fresh install the EULA's Accept first.
 5. Once in the world, `RouteCGpuStarter` or `RLHDStarter` starts the chosen GPU renderer, and
    `RendererPanelStarter` loads the other renderer plugins without starting them so they appear in the
    plugin list.

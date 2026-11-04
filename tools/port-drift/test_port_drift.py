@@ -157,6 +157,11 @@ class AndroidLookups(unittest.TestCase):
 
 
 class Repo(unittest.TestCase):
+    def test_every_declaration_in_a_file_is_on_the_boot_path(self):
+        found = pd.options_of("android")[0]  # JagexTokens.kt holds three
+        for key in ("autologin", "autologin.manual", "autologin.world"):
+            self.assertIn("-Drunelite.headless." + key, found)
+
     def test_report_on_this_tree(self):
         for _stager, tree in pd.RLHD.values():
             if not (pd.REPO / tree).is_dir():

@@ -267,7 +267,7 @@ code silently. The ones that help when debugging:
 | `runelite.gpuframedump` (+ `.dir`) | Writes each composited in-world GPU frame as a PNG. Android debug builds set it for GPU boots. |
 | `runelite.hover.text` | Restores the desktop hover label, which mobile hides because a touch screen has no hover. |
 | `runelite.key.pacing` | Keyboard pacing for typed input; on by default. |
-| `runelite.headless.autologin.*` | The desktop harness's synthesized login (world, click point, attempts). |
+| `runelite.headless.autologin.*` | The desktop harness's synthesized login (world, click point, attempts). On a phone `.manual` leaves the login to the player; for an unattended one use `-RMAutoLogin YES` (iOS) or an `autologin.mode` marker in the external files dir (Android debug builds). |
 
 On desktop, add a flag to the harness's `java` command line. On a phone, the launchers build the argument list in
 `JVMLauncher.m` (iOS) and `MainActivity.kt` (Android); add the flag there in a debug build, and don't commit it on.

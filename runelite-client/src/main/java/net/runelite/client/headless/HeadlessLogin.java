@@ -71,11 +71,24 @@ import net.runelite.api.widgets.Widget;
  * {@code -Drunelite.headless.autologin.eula.loginIndex=12}. Each stage re-arms up to {@code maxAttempts}
  * times if the state hasn't advanced, so a coordinate miss is visible (the captured frames + the attempt
  * log tell us whether the click landed).
+ *
+ * <p>With {@code -Drunelite.headless.autologin.manual=true}, which both shells pass, the player logs in. The
+ * machine stays armed only for what it owes them: relogging after a dropped connection or for a world hop, and
+ * dismissing the post-login welcome screen. The EULA, Play Now and "Try again" are theirs, and the world they
+ * land on is the one the client is on, which is where the Default World plugin put it.
  */
 @Slf4j
 public final class HeadlessLogin
 {
 	private static final boolean ENABLED = Boolean.getBoolean("runelite.headless.autologin");
+	// The player logs in; only relogs and the welcome screen stay automated. Both shells set this for real use.
+	private static boolean manual = Boolean.getBoolean("runelite.headless.autologin.manual");
+	// A login the player starts has no retry budget to run out, and the "Session expired" card hangs off a give-up.
+	// So failed logins are counted instead. Only those landing on "Try again" or the welcome screen count, the two
+	// screens the automated stages give up on: a members-world refusal has its own screen and is the player's to fix.
+	private static final int MAX_MANUAL_FAILURES = 3;
+	private static int manualFailures;
+	private static GameState lastManualState;
 	// The "logged into a Jagex account, ready to play" welcome screen — the only login sub-state with a
 	// Play Now button. (2 = username/password form, 4 = authenticator.)
 	private static final int WELCOME_LOGIN_INDEX =
@@ -187,9 +200,9 @@ public final class HeadlessLogin
 		if (ENABLED)
 		{
 			log.info("[headless-login] ENABLED playPoint={},{} welcomeLoginIndex={} eula={} eulaPoint={},{} "
-					+ "eulaLoginIndex={} maxAttempts={} world={} worldAddress={} legacy={}",
+					+ "eulaLoginIndex={} maxAttempts={} world={} worldAddress={} legacy={} manual={}",
 				CLICK_X, CLICK_Y, WELCOME_LOGIN_INDEX, EULA_ENABLED, EULA_X, EULA_Y, EULA_LOGIN_INDEX,
-				MAX_ATTEMPTS, WORLD_ID, WORLD_ADDRESS, legacyEnabled);
+				MAX_ATTEMPTS, WORLD_ID, WORLD_ADDRESS, legacyEnabled, manual);
 			if (legacyEnabled && (LEGACY_USER == null || LEGACY_USER.isEmpty()
 				|| LEGACY_PASS == null || LEGACY_PASS.isEmpty()))
 			{
@@ -323,6 +336,9 @@ public final class HeadlessLogin
 		layoutHeight = -1;
 		layoutDraws = 0;
 		legacyEnabled = Boolean.getBoolean("runelite.headless.autologin.legacy");
+		manual = Boolean.getBoolean("runelite.headless.autologin.manual");
+		manualFailures = 0;
+		lastManualState = null;
 	}
 
 	/**
@@ -332,6 +348,12 @@ public final class HeadlessLogin
 	static void setLegacyEnabledForTest(boolean enabled)
 	{
 		legacyEnabled = enabled;
+	}
+
+	/** TEST-1 seam: {@code manual} is read once at clinit, as {@code legacyEnabled} is. Package-private, test-only. */
+	static void setManualForTest(boolean enabled)
+	{
+		manual = enabled;
 	}
 
 	/**
@@ -414,7 +436,8 @@ public final class HeadlessLogin
 		{
 			sawConnectionLost = true;
 		}
-		if (done && sawConnectionLost && state == GameState.LOGIN_SCREEN && reconnectAttempts < MAX_RECONNECT)
+		// Manual mode has nothing else to take over if the drop came before `done` latched, say on the welcome screen.
+		if ((done || manual) && sawConnectionLost && state == GameState.LOGIN_SCREEN && reconnectAttempts < MAX_RECONNECT)
 		{
 			reconnectAttempts++;
 			sawConnectionLost = false;
@@ -433,6 +456,10 @@ public final class HeadlessLogin
 			welcomeGaveUp = false;
 			log.info("[headless-login] reconnect: disconnect detected (CONNECTION_LOST) -> re-arming login (cycle {}/{})",
 				reconnectAttempts, MAX_RECONNECT);
+		}
+		if (manual)
+		{
+			noteManualLogin(state, loginIndex);
 		}
 		if (done)
 		{
@@ -503,6 +530,12 @@ public final class HeadlessLogin
 		{
 			hopAwaitingLogin = false;
 			log.info("[headless-login] world-hop: logout reached LOGIN_SCREEN -> reloging into W{}", pendingHopWorldId);
+		}
+
+		// The login screen is the player's. Only a relog this machine owes them goes on from here.
+		if (manual && !isRelogging())
+		{
+			return;
 		}
 
 		if (draws < WARMUP_DRAWS)
@@ -647,6 +680,56 @@ public final class HeadlessLogin
 		else
 		{
 			synthesizeClick(canvas, CLICK_X, CLICK_Y);
+		}
+	}
+
+	/** A relog the machine owes the player: recovering a dropped connection, or finishing a world hop. */
+	private static boolean isRelogging()
+	{
+		return reconnectAttempts > 0 || pendingHopActive || hopAwaitingLogin;
+	}
+
+	/**
+	 * Manual mode's bookkeeping, per draw. Two things no stage below can do, because the player is driving: latch
+	 * the give-up when their logins keep failing, so the "Session expired" card still shows, and re-arm the welcome
+	 * dismiss after a deliberate logout, so every login enters the world the way the first one did.
+	 */
+	private static void noteManualLogin(GameState state, int loginIndex)
+	{
+		final GameState previous = lastManualState;
+		lastManualState = state;
+		if (state == GameState.LOGGED_IN)
+		{
+			manualFailures = 0;
+			// Whatever got them here, nothing is left to recover. The engine can ride out a blip by itself, and the
+			// player can log in past a give-up; either would otherwise read as a drop at their next logout.
+			sawConnectionLost = false;
+			if (done)
+			{
+				reconnectAttempts = 0;
+				pendingHopActive = false;
+				gaveUp = false;
+			}
+			return;
+		}
+		if (state != GameState.LOGIN_SCREEN || isRelogging())
+		{
+			return;
+		}
+		if (previous == GameState.LOGGING_IN
+			&& (loginIndex == WELCOME_LOGIN_INDEX || loginIndex == RECONNECT_LOGIN_INDEX)
+			&& ++manualFailures >= MAX_MANUAL_FAILURES)
+		{
+			log.warn("[headless-login] {} logins in a row failed (loginIndex={}) — surfacing the session card",
+				manualFailures, loginIndex);
+			gaveUp = true;
+		}
+		if (done && !gaveUp)
+		{
+			done = false;
+			welcomeDone = false;
+			welcomeAttempts = 0;
+			welcomeGaveUp = false;
 		}
 	}
 

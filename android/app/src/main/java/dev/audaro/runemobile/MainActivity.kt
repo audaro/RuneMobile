@@ -243,6 +243,7 @@ class MainActivity : AppCompatActivity() {
     // User-defined hotkey buttons: a HUD strip the user populates from the Hotkeys screen (persisted in PREFS_HOTKEYS).
     private var hotkeyRow: LinearLayout? = null // the button container (repopulated on change)
     private var hotkeyStrip: HorizontalScrollView? = null // scroll host (GONE when no hotkeys are active)
+    private var onLoginScreen = false
     private var hotkeyPrefsListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
 
     // UX-XCUT-01: the only release-visible HUD controls. Held as fields so the root window-inset listener can
@@ -3111,6 +3112,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** GONE until populated, and on the login screen: it can reach over the login's buttons, and no hotkey acts there. */
+    private fun showHotkeyStrip() {
+        val filled = (hotkeyRow?.childCount ?: 0) > 0
+        hotkeyStrip?.visibility = if (filled && !onLoginScreen) View.VISIBLE else View.GONE
+    }
+
     /** User-defined hotkey buttons: build the (empty) HUD strip host. Populated by [refreshHotkeyStrip] from the
      *  PREFS_HOTKEYS active set the native Hotkeys screen writes. GONE until the user activates at least one. */
     private fun buildHotkeyStrip(): HorizontalScrollView {
@@ -3196,7 +3203,7 @@ class MainActivity : AppCompatActivity() {
                 },
             )
         }
-        strip.visibility = if (row.childCount > 0) View.VISIBLE else View.GONE
+        showHotkeyStrip()
         strip.post { placeLauncherHandle() } // a strip gone isn't laid out, so its layout listener misses it
     }
 
@@ -3851,8 +3858,13 @@ class MainActivity : AppCompatActivity() {
         // that we saw the login screen (the snapshot's loginScreen flag); on the next logged-in frame that consumes
         // the flag and opens a bounded suppression window. An in-game LOADING/teleport blip reports loggedIn=false
         // WITHOUT loginScreen, so it never arms the window → chrome stays engaged through region loads (unchanged).
+        val loginScreen = o?.optBoolean("loginScreen") == true
+        if (loginScreen != onLoginScreen) {
+            onLoginScreen = loginScreen
+            showHotkeyStrip()
+        }
         if (!loggedIn) {
-            if (o?.optBoolean("loginScreen") == true) sawLoginScreen = true
+            if (loginScreen) sawLoginScreen = true
         } else if (sawLoginScreen) {
             sawLoginScreen = false
             loginTransitionUntilMs = SystemClock.uptimeMillis() + LOGIN_TRANSITION_MS
@@ -5756,8 +5768,8 @@ class MainActivity : AppCompatActivity() {
         // OSRS legacy prefs blob, which the gamepack reads at startup and persists. Patch/seed it before startJvm.
         ensureResizableDisplayMode(File(app.filesDir, ".runelite/jagexcache/oldschool/LIVE/preferences.dat"))
 
-        // JX_* launcher handoff: if a tokens.json is present, set the JX_* env (before startJvm) and arm
-        // HeadlessLogin's EULA->Play Now click machine. No tokens.json -> login-screen render only. The setenv
+        // JX_* launcher handoff: if a tokens.json is present, set the JX_* env (before startJvm), which puts the login
+        // screen on Play Now, and arm HeadlessLogin. No tokens.json -> login-screen render only. The setenv
         // must happen here, before JvmLauncher.startJvm creates the VM (HotSpot snapshots env at startup).
         val autologinArmed = JagexTokens.loadAndArm(app)
         // Legacy (non-Jagex) username/password fallback: arms HeadlessLogin's legacy stage instead. A
@@ -5874,20 +5886,26 @@ class MainActivity : AppCompatActivity() {
                     "resizable iff account in resizable display mode)",
             )
         }
-        // 117HD auto-login: on a real home-network device login works, so autologin straight in-world (RLHDStarter
-        // engages at LOGGED_IN too) — the desired turnkey launch. SKIP it only for the Firebase DATACENTER pre-login
-        // case (an explicit rlhd_prelogin.mode marker): there the world connect is WAF-blocked and autologin would
-        // churn at state=UNKNOWN forever instead of settling at LOGIN_SCREEN, so the Zone shader-compile proof needs
-        // the clean login screen. Default (no marker) = autologin, including in routecrlhd.
+        // Arm the login machine in every renderer (RLHDStarter engages at LOGGED_IN too). SKIP it only for the Firebase
+        // DATACENTER pre-login case (an explicit rlhd_prelogin.mode marker): there the world connect is WAF-blocked and
+        // an automated login would churn at state=UNKNOWN forever instead of settling at LOGIN_SCREEN, so the Zone
+        // shader-compile proof needs the clean login screen.
         val rlhdPreLogin = rlhd && devMarker("rlhd_prelogin.mode")
+        // The dev gates can't tap: an autologin.mode marker or a census gets the unattended login, debug builds only.
+        val devAutologin =
+            BuildConfig.DEBUG &&
+                (census || devMarker("autologin.mode") || intent?.action == "com.google.intent.action.TEST_LOOP")
         if (autologinArmed && !rlhdPreLogin) {
-            opts.addAll(JagexTokens.autologinOpts)
+            opts.addAll(JagexTokens.loginOpts)
+            opts.addAll(if (devAutologin) JagexTokens.devAutologinOpts else JagexTokens.playerLoginOpts)
             Log.i(
                 TAG,
-                "autologin ARMED (tokens.json present)${if (rlhd) " [routecrlhd -> RLHDStarter loads 117HD at LOGGED_IN]" else ""}: EULA 302,312 -> Play Now 382,248, world 301",
+                "login ARMED (tokens.json present)${if (rlhd) " [routecrlhd -> RLHDStarter loads 117HD at LOGGED_IN]" else ""}: " +
+                    if (devAutologin) "dev autologin, world 301" else "the player presses Play Now",
             )
         } else if (legacyArmed && !rlhdPreLogin) {
-            opts.addAll(JagexTokens.autologinOpts)
+            opts.addAll(JagexTokens.loginOpts)
+            opts.addAll(JagexTokens.devAutologinOpts)
             opts.add("-Drunelite.headless.autologin.legacy=true")
             Log.i(TAG, "LEGACY autologin ARMED (legacy_login.json present): username/password form, world 301")
         } else if (rlhd) {

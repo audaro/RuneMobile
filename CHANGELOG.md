@@ -14,6 +14,18 @@ as "What's new".
 
 ## [Unreleased]
 
+### Changed
+- **You log in yourself now.** The game stops at the login screen and waits for you to press Play Now, on the world
+  you chose. It no longer signs in by itself or forces World 301, so the Default World plugin works, including
+  "Use last world". Reconnecting after a dropped connection and hopping worlds are still automatic.
+
+### Fixed
+- **The RuneLite profile you pick stays picked.** It used to go back to the old one at every launch.
+- **Choosing a world on the login screen picks the world you tapped.** It used to pick the row under your previous
+  tap, which often ended in "You need a members' account to use this world".
+- **iOS: the pinned keys no longer cover the login screen.** The camera arrows sat on top of the world switcher.
+  Pinned keys and the hotkey strip stand aside until you're in the game; on Android, so does the hotkey strip.
+
 ## [0.7.1] - 2026-11-01
 
 0.7.0 was tagged but never released; its changes ship here, so this is the first release since 0.6.0.

@@ -281,6 +281,7 @@ static NSString *RMPasteLine(NSString *s) {
 @property (nonatomic, strong) UIButton *keyboardButton;
 @property (nonatomic, strong) UIButton *settingsButton;  // persistent ⚙ entry point (bottom-left) — the only always-on control
 @property (nonatomic, strong) UIButton *kbFab;           // always-on ⌨︎ keyboard toggle, pinned top-centre (keyboard-safe)
+@property (nonatomic, assign) BOOL onLoginScreen;        // the snapshot's loginScreen flag; see updateLoginScreenControls
 @property (nonatomic, strong) UIStackView *controlsBox;  // packs the player's pinned on-screen controls to the right of the gear
 @property (nonatomic, strong) UIView *editOverlay;       // the "Edit controls" palette overlay (nil unless editing)
 @property (nonatomic, assign) BOOL developerMode;        // gates the dev tools (debug panel)
@@ -5638,6 +5639,18 @@ static const CFTimeInterval kKeepAwakeGrace = 10.0;
     ]];
 }
 
+// The login screen's own buttons run along the bottom, under the pinned keys and the hotkey strip: the world switcher
+// sat behind the camera arrows. No key acts on that screen, so they stand down until the player is back in the game.
+- (void)updateLoginScreenControls {
+    NSDictionary *d = parseBridgeJSON([JVMLauncher chromeSnapshot], "ViewController.updateLoginScreenControls");
+    BOOL login = [d isKindOfClass:[NSDictionary class]] && [d[@"loginScreen"] boolValue];
+    if (login == self.onLoginScreen)
+        return;
+    self.onLoginScreen = login;
+    self.controlsBox.hidden = login || self.mapOpen;
+    self.hotkeyStrip.hidden = login || !self.hotkeyStripVisible;
+}
+
 // UX-LOGIN-01: drive the card from the snapshot's give-up flag (~10 Hz from onDisplayTick, ungated by
 // login/chrome for the same reason as the reconnect updater: it only ever shows while NOT logged in).
 - (void)updateSessionExpiredOverlay {
@@ -7293,7 +7306,7 @@ static CGRect mapRectFromArr(NSArray *a) {
     // stack, and the plugin dock. (The legacy cluster stays permanently hidden via hideLegacyCluster, so we
     // must NOT toggle it here — setting .hidden=NO on close would resurrect the retired buttons.)
     self.settingsButton.hidden = open;
-    self.controlsBox.hidden = open;
+    self.controlsBox.hidden = open || self.onLoginScreen;
     self.kbFab.hidden = open || self.chatColumnShown;
     self.panelDock.view.hidden = open;
     self.closeMapButton.hidden = !open; // inverse of the rest: the ✕ shows only WHILE the map is open
@@ -7495,6 +7508,7 @@ static CGRect mapRectFromArr(NSArray *a) {
         [self updateLayoutSwitch]; // ungated by chromeVisible: the wrong layout strands the player either way
         [self updateReconnectOverlay];
         [self updateSessionExpiredOverlay]; // UX-LOGIN-01: same cadence/ungating as the reconnect scrim
+        [self updateLoginScreenControls];
         [self updateFatalErrorOverlay];     // FATAL-1: latch-once fatal card, same cadence
         [self updateHoppingOverlay];        // PARITY-P0-3: world-hop scrim, same cadence/ungating
         [self stampFirstInWorld];           // Phase 4 cold start: once, then a no-op
@@ -9505,7 +9519,7 @@ static CGRect mapRectFromArr(NSArray *a) {
             return;
         }
     }
-    self.hotkeyStrip.hidden = !self.hotkeyStripVisible;
+    self.hotkeyStrip.hidden = !self.hotkeyStripVisible || self.onLoginScreen;
     self.hotkeyButton.backgroundColor = self.hotkeyStripVisible
         ? [UIColor colorWithRed:0.95 green:0.62 blue:0.11 alpha:0.92] : [UIColor colorWithWhite:0.0 alpha:0.45];
     self.hotkeyButton.tintColor = self.hotkeyStripVisible ? [UIColor blackColor] : [UIColor whiteColor];

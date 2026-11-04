@@ -58,11 +58,14 @@ RESULTS_DIR="rl-$MODE-$(date +%s 2>/dev/null || echo run)"
 
 OTHER=()
 PULL=()
+# The app waits for a player to press Play Now unless this marker asks for the unattended login.
+AUTOLOGIN_MARKER="$(mktemp)"; printf 'go\n' > "$AUTOLOGIN_MARKER"
+DEV_AUTOLOGIN="$DEV_FILES/autologin.mode=$AUTOLOGIN_MARKER"
 if [ "$MODE" != "recon" ] && [ -f "$TOKENS" ]; then
-  # Push tokens.json to the app's external files dir before the test -> arms autologin.
+  # Push tokens.json + the marker to the app's external files dir before the test -> arms autologin.
   # CONFIRM on first run: the dir exists at push time on a fresh Test Lab device (Android creates it on
   # install); if the push is rejected, fall back to /sdcard/Download and widen JagexTokens' search path.
-  OTHER=(--other-files "$DEV_TOKENS=$TOKENS")
+  OTHER=(--other-files "$DEV_TOKENS=$TOKENS,$DEV_AUTOLOGIN")
 fi
 if [ "$MODE" = "netprobe" ]; then
   # AG2 login diagnosis: push tokens + a netprobe.mode marker; the app runs NetProbe (no JVM boot) and logs whether
@@ -76,7 +79,7 @@ if [ "$MODE" = "gpu" ]; then
   # Seed the gpu.mode marker (Robo can't pass --ez routecgpu); MainActivity boots GPU Route-C when it exists.
   # Combine with the tokens push into ONE --other-files (comma-separated dev=local pairs).
   MARKER="$(mktemp)"; printf 'routecgpu\n' > "$MARKER"
-  if [ -f "$TOKENS" ]; then OTHER=(--other-files "$DEV_TOKENS=$TOKENS,$DEV_MARKER=$MARKER"); else OTHER=(--other-files "$DEV_MARKER=$MARKER"); fi
+  if [ -f "$TOKENS" ]; then OTHER=(--other-files "$DEV_TOKENS=$TOKENS,$DEV_MARKER=$MARKER,$DEV_AUTOLOGIN"); else OTHER=(--other-files "$DEV_MARKER=$MARKER"); fi
   # Pull the dumped GPU frames (app-private external storage) back to the results bucket.
   PULL=(--directories-to-pull "$DEV_FRAMES")
   : "${FB_TIMEOUT:=300s}"   # GPU boot + login + a few frame dumps needs longer than the 180s default
@@ -90,7 +93,7 @@ if [ "$MODE" = "rlhd" ]; then
   # Pre-login: the Zone shader compile happens at the LOGIN SCREEN. Tokens are now baked into the APK asset, so
   # autologin would arm and churn at state=UNKNOWN on this datacenter device (world connect WAF-blocked) and never
   # settle at LOGIN_SCREEN — so seed an rlhd_prelogin.mode marker (MainActivity skips autologin when present) to
-  # keep the clean LOGIN_SCREEN -> RLHDStarter -> 117HD compile path. (On a real home device, no marker = autologin.)
+  # keep the clean LOGIN_SCREEN -> RLHDStarter -> 117HD compile path. (On a real home device, tokens + the autologin.mode marker = autologin.)
   # Also seed the shader-dump marker (librlawt logs the numbered downported source so a driver "0:N" error maps to
   # a source line). Set FB_NO_SHADERDUMP=1 to skip once the Zone shaders compile clean.
   PRELOGIN="$DEV_FILES/rlhd_prelogin.mode=$MARKER"

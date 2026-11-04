@@ -42,8 +42,7 @@ def main():
         sd.install(udid, no_build=args.no_build, jars=args.jars)
         drv = sd.Driver(udid)
         launch_args = ["-rendererPref", "cpu", "-RMAutoPlay", "YES", "-RMScreenDriver", "YES"]
-        if not args.logged_in:
-            launch_args += ["-RMSkipLogin", "YES"]
+        launch_args += ["-RMAutoLogin", "YES"] if args.logged_in else ["-RMSkipLogin", "YES"]
         drv.cmd_file.unlink(missing_ok=True)
         launched = time.time()
         if subprocess.run(["xcrun", "simctl", "launch", "--terminate-running-process", udid, hs.IOS_BUNDLE_ID]

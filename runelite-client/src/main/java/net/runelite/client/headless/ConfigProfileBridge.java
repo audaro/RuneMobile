@@ -130,8 +130,8 @@ public final class ConfigProfileBridge
 	/**
 	 * Switch the active config profile by id. Returns a JSON ack immediately; the switch itself runs on the
 	 * background executor and completes asynchronously (the native side re-reads {@link #getProfilesJson()} to
-	 * pick up the new active flag). {@code ok:false} when the bridge is unwired, the id is unknown, or it is
-	 * already the active profile.
+	 * pick up the new active flag). The choice is saved first, so the next launch starts in it too.
+	 * {@code ok:false} when the bridge is unwired, the id is unknown, or it is already the active profile.
 	 */
 	public static String switchProfile(long id)
 	{
@@ -150,6 +150,14 @@ public final class ConfigProfileBridge
 		try (ProfileManager.Lock lock = pm.lock())
 		{
 			target = lock.findProfile(id);
+			if (target != null)
+			{
+				// The saved flag is what the next launch's ConfigManager#load picks from, so this is what makes
+				// the choice outlive the session. Same as the desktop profile panel; the lock's close writes it.
+				lock.getProfiles().forEach(p -> p.setActive(false));
+				target.setActive(true);
+				lock.dirty();
+			}
 		}
 		catch (Throwable ex)
 		{
