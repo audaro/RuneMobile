@@ -159,6 +159,13 @@ public class PanelClicksTest
 	}
 
 	@Test
+	public void theColumnsAndTheirRowAreOneThingInThatOrderToo()
+	{
+		clicks.count(worldColumnA, 0);
+		assertEquals(2, clicks.count(rowA, 150 * MS));
+	}
+
+	@Test
 	public void twoRowsAreNeverOneDoubleClick()
 	{
 		clicks.count(worldColumnA, 0);
