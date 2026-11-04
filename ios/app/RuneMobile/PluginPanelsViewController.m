@@ -790,6 +790,13 @@ static const CGFloat kDockPanelW = 334.0;     // inline panel column width (≈3
     if (self.currentIndex < 0) return;
     if (self.docked && self.panelContainer.hidden) return;
     int seq = [JVMLauncher mobilePanelFrameSeq];
+    if (seq < 0) { // the game needs an answer to something this panel covers
+        if (self.docked)
+            [self collapsePanel];
+        else
+            [self onDone];
+        return;
+    }
     if (seq == self.lastSeq) return;
     UIImage *img = [JVMLauncher mobilePanelImage];
     if (!img || img.size.width < 1) return;

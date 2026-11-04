@@ -348,7 +348,13 @@ fun PluginPanel(
 
                 panelOpen != null -> {
                     val po = panelOpen!!
-                    PanelView(po.first, po.second, onBack = { panelOpen = null }, onPanelTextActive = onPanelTextActive)
+                    PanelView(
+                        po.first,
+                        po.second,
+                        onBack = { panelOpen = null },
+                        onCloseSheet = onClose,
+                        onPanelTextActive = onPanelTextActive,
+                    )
                 }
 
                 configFor != null -> {

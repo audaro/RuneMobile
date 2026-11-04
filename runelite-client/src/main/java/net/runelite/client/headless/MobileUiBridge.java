@@ -666,6 +666,10 @@ public final class MobileUiBridge
 	// The supersample scale actually used for the active panel's buffer (see renderActiveOnEdt — it is reduced
 	// from RENDER_SCALE for tall panels to keep the buffer within a memory budget). panelClick divides by it.
 	private static volatile int activeRenderScale = RENDER_SCALE;
+	private static final PanelClicks panelClicks = new PanelClicks();
+	private static final PanelHopPrompt panelHopPrompt = new PanelHopPrompt();
+	// Set when the game opens something the panel would cover; see getPanelFrameSeq. Cleared by the close it asks for.
+	private static volatile boolean panelCloseWanted;
 	private static final AtomicInteger panelSeq = new AtomicInteger();
 	private static volatile boolean panelRepainterRunning;
 	// SC-4 (PANEL-1): the Swing text field the last panelClick landed in (so panelText/panelKey route typed input
@@ -687,6 +691,7 @@ public final class MobileUiBridge
 			return "{\"ok\":false,\"reason\":\"bad-index\"}";
 		}
 		final PluginPanel pp = navs.get(index).getPanel();
+		panelCloseWanted = false; // the race with closePanel: a request that lost it must not close this panel
 		EventQueue.invokeLater(() ->
 		{
 			try
@@ -718,6 +723,7 @@ public final class MobileUiBridge
 	public static String closePanel()
 	{
 		EventQueue.invokeLater(MobileUiBridge::closeActiveOnEdt);
+		panelCloseWanted = false;
 		panelPixels = null;
 		activeTextTarget = null;   // dismiss the panel keyboard (SC-4 / PANEL-1)
 		panelTextActive = false;
@@ -754,6 +760,7 @@ public final class MobileUiBridge
 		activeTextTarget = null;
 		panelTextActive = false;
 		panelTextValue = "";
+		panelClicks.reset();
 	}
 
 	// Lay out the active panel at full content height and paint it to a fresh ARGB buffer (EDT only).
@@ -833,9 +840,13 @@ public final class MobileUiBridge
 		return panelH;
 	}
 
+	/**
+	 * Bumps on every repaint. Negative asks the host to close the panel: the game needs an answer to something the
+	 * panel is covering. Both hosts poll this while a panel is open, and a close clears it.
+	 */
 	public static int getPanelFrameSeq()
 	{
-		return panelSeq.get();
+		return panelCloseWanted ? -1 : panelSeq.get();
 	}
 
 	/** The active panel's full ARGB image (PANEL_W x panelH), or empty if none. */
@@ -847,7 +858,8 @@ public final class MobileUiBridge
 
 	/**
 	 * Dispatch a click at panel-space ({@code x},{@code y}) into the active panel's Swing tree (EDT). Drives
-	 * buttons/checkboxes/combo arrows; a synthetic press+release+click on the deepest component at that point.
+	 * buttons/checkboxes/combo arrows; a synthetic press+release+click on what a real mouse would reach at that point,
+	 * with a double tap counted as a double-click.
 	 */
 	public static String panelClick(int x, int y)
 	{
@@ -855,6 +867,8 @@ public final class MobileUiBridge
 		{
 			return "{\"ok\":false}";
 		}
+		// Read here, not on the EDT: it can sit behind a panel render for longer than a double tap takes.
+		final long tappedAt = System.nanoTime();
 		EventQueue.invokeLater(() ->
 		{
 			final JPanel wrapped = activeWrapped;
@@ -867,20 +881,22 @@ public final class MobileUiBridge
 			final int s = Math.max(1, activeRenderScale);
 			final int lx = x / s;
 			final int ly = y / s;
-			final Component target = SwingUtilities.getDeepestComponentAt(wrapped, lx, ly);
-			if (target == null)
+			final Component deepest = SwingUtilities.getDeepestComponentAt(wrapped, lx, ly);
+			if (deepest == null)
 			{
 				return;
 			}
+			final Component target = PanelClicks.target(deepest);
 			final Point p = SwingUtilities.convertPoint(wrapped, lx, ly, target);
+			final int clicks = panelClicks.count(target, tappedAt);
 			final long when = panelSeq.get(); // monotonic, fine for event timestamps off the game clock
 			final int mods = MouseEvent.BUTTON1_DOWN_MASK;
-			target.dispatchEvent(new MouseEvent(target, MouseEvent.MOUSE_PRESSED, when, mods, p.x, p.y, 1, false, MouseEvent.BUTTON1));
-			target.dispatchEvent(new MouseEvent(target, MouseEvent.MOUSE_RELEASED, when + 1, 0, p.x, p.y, 1, false, MouseEvent.BUTTON1));
-			target.dispatchEvent(new MouseEvent(target, MouseEvent.MOUSE_CLICKED, when + 2, 0, p.x, p.y, 1, false, MouseEvent.BUTTON1));
+			target.dispatchEvent(new MouseEvent(target, MouseEvent.MOUSE_PRESSED, when, mods, p.x, p.y, clicks, false, MouseEvent.BUTTON1));
+			target.dispatchEvent(new MouseEvent(target, MouseEvent.MOUSE_RELEASED, when + 1, 0, p.x, p.y, clicks, false, MouseEvent.BUTTON1));
+			target.dispatchEvent(new MouseEvent(target, MouseEvent.MOUSE_CLICKED, when + 2, 0, p.x, p.y, clicks, false, MouseEvent.BUTTON1));
 			// SC-4 (PANEL-1): if the tap landed in an editable text field, focus it and snapshot its text so the
 			// native shell raises the soft keyboard + pre-fills it; otherwise clear the target so it dismisses.
-			final javax.swing.text.JTextComponent tc = textComponentFor(target);
+			final javax.swing.text.JTextComponent tc = textComponentFor(deepest);
 			if (tc != null && tc.isEnabled() && tc.isEditable())
 			{
 				tc.requestFocusInWindow();
@@ -2510,6 +2526,11 @@ public final class MobileUiBridge
 		TimeTrackingBridge.tick(c);  // refresh the native Time Tracking snapshot (no-op unless its screen is open)
 		OverlayBridge.tick(c);       // refresh the native overlay edit-mode snapshot (no-op unless open)
 		InfoBoxBridge.tick(c);       // refresh the native infobox menu snapshot (no-op unless open)
+		if (panelHopPrompt.justOpened(c) && activePanel != null)
+		{
+			log.info("[mobileui] world hop prompt opened under a panel: asking the host to close it");
+			panelCloseWanted = true;
+		}
 		// The "click here to talk" affordance is the right target — NOT the scroll/message area or the tabs.
 		// INPUT_CLICKAREA is the entry hit-region; fall back to the input line (CHATBOX_INPUT) if absent.
 		Widget w = c.getWidget(InterfaceID.Chatbox.INPUT_CLICKAREA);

@@ -26,6 +26,9 @@ as "What's new".
   setting too.
 
 ### Fixed
+- **Double tap works in plugin panels.** Anything a plugin does on a double-click now happens on a double tap, as it
+  does on desktop: double tap a row in Star Miners to hop to that world. When the game asks you to confirm the hop, the
+  panel closes so you can see the question.
 - **The RuneLite profile you pick stays picked.** It used to go back to the old one at every launch.
 - **Choosing a world on the login screen picks the world you tapped.** It used to pick the row under your previous
   tap, which often ended in "You need a members' account to use this world".

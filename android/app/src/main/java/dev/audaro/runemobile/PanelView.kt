@@ -117,6 +117,7 @@ fun PanelView(
     index: Int,
     tooltip: String,
     onBack: () -> Unit,
+    onCloseSheet: () -> Unit,
     onPanelTextActive: (Boolean) -> Unit = {},
 ) {
     var bmp by remember { mutableStateOf<Bitmap?>(null) }
@@ -165,6 +166,12 @@ fun PanelView(
                             )
                         }.get()
                 }
+            if (s.seq < 0) {
+                // The game needs an answer to something this covers. The whole sheet goes: the list behind this
+                // screen would cover it just the same.
+                onCloseSheet()
+                break
+            }
             if (s.seq != lastSeq && s.w > 0 && s.h > 0 && s.px != null && s.px.size >= s.w * s.h) {
                 bmp = Bitmap.createBitmap(s.px, 0, s.w, s.w, s.h, Bitmap.Config.ARGB_8888)
                 pw = s.w

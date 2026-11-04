@@ -509,7 +509,8 @@ Phase-6 (W3): the second reverse-JNI facade — the *Java-owned* mobile-UI contr
   Raw read of a stored config value (null if unset). Used by RLHDStarter's first-launch defaults sentinel.
 - `getMobileUiSeq()` → `long`  
   Latest event sequence number. The panel stores this and polls `pollMobileUiEvents(long)` from it.
-- `getPanelFrameSeq()` → `int`
+- `getPanelFrameSeq()` → `int`  
+  Bumps on every repaint. Negative asks the host to close the panel: the game needs an answer to something the panel is covering. Both hosts poll this while a panel is open, and a close clears it.
 - `getPanelHeight()` → `int`
 - `getPanelPixels()` → `int[]`  
   The active panel's full ARGB image (PANEL_W x panelH), or empty if none.
@@ -560,7 +561,7 @@ Phase-6 (W3): the second reverse-JNI facade — the *Java-owned* mobile-UI contr
 - `openPanel(int index)` → `String`  
   Open (realize + activate) the panel at the toolbar `index`; starts the repaint loop.
 - `panelClick(int x, int y)` → `String`  
-  Dispatch a click at panel-space (`x`,`y`) into the active panel's Swing tree (EDT). Drives buttons/checkboxes/combo arrows; a synthetic press+release+click on the deepest component at that point.
+  Dispatch a click at panel-space (`x`,`y`) into the active panel's Swing tree (EDT). Drives buttons/checkboxes/combo arrows; a synthetic press+release+click on what a real mouse would reach at that point, with a double tap counted as a double-click.
 - `panelKey(int vk)` → `String`  
   Dispatch a single key (e.g. `VK_ENTER` to submit, `VK_BACK_SPACE`) to the focused panel text field (SC-4 / PANEL-1). Used for keys a whole-text mirror can't express, like Enter on a search box.
 - `panelLongPress(int x, int y)` → `String`  
