@@ -53,6 +53,7 @@ import net.runelite.client.config.RuneLiteConfig;
 import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.headless.ConfigProfileBridge;
 import net.runelite.client.headless.DiagnosticsBridge;
+import net.runelite.client.headless.HeadlessLogin;
 import net.runelite.client.headless.HudVeneerBridge;
 import net.runelite.client.headless.JavaBridge;
 import net.runelite.client.headless.MobileUiBridge;
@@ -187,6 +188,8 @@ public class HeadlessClientUI extends ClientUI
 	@Override
 	public void show()
 	{
+		// RuneLite.start() calls show() straight after startPlugins().
+		HeadlessLogin.onPluginsStarted();
 		SwingUtilities.invokeLater(() ->
 		{
 			// Realize the peer hierarchy so the gamepack Canvas can hand the engine a non-null Graphics.

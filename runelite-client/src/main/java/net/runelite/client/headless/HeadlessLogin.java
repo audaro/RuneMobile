@@ -75,7 +75,8 @@ import net.runelite.api.widgets.Widget;
  * <p>With {@code -Drunelite.headless.autologin.manual=true}, which both shells pass, the player logs in. The
  * machine stays armed only for what it owes them: relogging after a dropped connection or for a world hop, and
  * dismissing the post-login welcome screen. The EULA, Play Now and "Try again" are theirs, and the world they
- * land on is the one the client is on, which is where the Default World plugin put it.
+ * land on is the one the client is on, which is where the Default World plugin put it. The Auto-login setting adds
+ * {@code -Drunelite.headless.autologin.launch=true}: the machine presses that first Play Now for them, once.
  */
 @Slf4j
 public final class HeadlessLogin
@@ -83,6 +84,10 @@ public final class HeadlessLogin
 	private static final boolean ENABLED = Boolean.getBoolean("runelite.headless.autologin");
 	// The player logs in; only relogs and the welcome screen stay automated. Both shells set this for real use.
 	private static boolean manual = Boolean.getBoolean("runelite.headless.autologin.manual");
+	// The Auto-login setting: on top of manual, the first Play Now of this launch is pressed for the player.
+	private static boolean launchLogin = Boolean.getBoolean("runelite.headless.autologin.launch");
+	private static volatile boolean pluginsStarted;
+	private static int launchDraws;
 	// A login the player starts has no retry budget to run out, and the "Session expired" card hangs off a give-up.
 	// So failed logins are counted instead. Only those landing on "Try again" or the welcome screen count, the two
 	// screens the automated stages give up on: a members-world refusal has its own screen and is the player's to fix.
@@ -200,9 +205,9 @@ public final class HeadlessLogin
 		if (ENABLED)
 		{
 			log.info("[headless-login] ENABLED playPoint={},{} welcomeLoginIndex={} eula={} eulaPoint={},{} "
-					+ "eulaLoginIndex={} maxAttempts={} world={} worldAddress={} legacy={} manual={}",
+					+ "eulaLoginIndex={} maxAttempts={} world={} worldAddress={} legacy={} manual={} launch={}",
 				CLICK_X, CLICK_Y, WELCOME_LOGIN_INDEX, EULA_ENABLED, EULA_X, EULA_Y, EULA_LOGIN_INDEX,
-				MAX_ATTEMPTS, WORLD_ID, WORLD_ADDRESS, legacyEnabled, manual);
+				MAX_ATTEMPTS, WORLD_ID, WORLD_ADDRESS, legacyEnabled, manual, launchLogin);
 			if (legacyEnabled && (LEGACY_USER == null || LEGACY_USER.isEmpty()
 				|| LEGACY_PASS == null || LEGACY_PASS.isEmpty()))
 			{
@@ -337,6 +342,9 @@ public final class HeadlessLogin
 		layoutDraws = 0;
 		legacyEnabled = Boolean.getBoolean("runelite.headless.autologin.legacy");
 		manual = Boolean.getBoolean("runelite.headless.autologin.manual");
+		launchLogin = Boolean.getBoolean("runelite.headless.autologin.launch");
+		pluginsStarted = false;
+		launchDraws = 0;
 		manualFailures = 0;
 		lastManualState = null;
 	}
@@ -354,6 +362,21 @@ public final class HeadlessLogin
 	static void setManualForTest(boolean enabled)
 	{
 		manual = enabled;
+	}
+
+	/** TEST-1 seam: {@code launchLogin} is read once at clinit too. Package-private, test-only. */
+	static void setLaunchLoginForTest(boolean enabled)
+	{
+		launchLogin = enabled;
+	}
+
+	/**
+	 * The plugins are up. The game runs well before they do, and the Default World plugin moves the client to the
+	 * player's world as it starts, so a launch login has to wait for this or it lands on Jagex's default world.
+	 */
+	public static void onPluginsStarted()
+	{
+		pluginsStarted = true;
 	}
 
 	/**
@@ -532,8 +555,9 @@ public final class HeadlessLogin
 			log.info("[headless-login] world-hop: logout reached LOGIN_SCREEN -> reloging into W{}", pendingHopWorldId);
 		}
 
-		// The login screen is the player's. Only a relog this machine owes them goes on from here.
-		if (manual && !isRelogging())
+		// The login screen is the player's. Only a relog this machine owes them, or the launch login they asked for,
+		// goes on from here.
+		if (manual && !isRelogging() && !launchLoginDue(loginIndex))
 		{
 			return;
 		}
@@ -668,6 +692,9 @@ public final class HeadlessLogin
 
 		playAttempts++;
 		lastPlayDraw = draws;
+		// The launch login is one press. If it doesn't take, the screen stays the player's: no retry to land in a world
+		// list they've opened since, and no give-up, because nothing about their session has failed.
+		launchLogin = false;
 		log.info("[headless-login] Play Now attempt {}/{}: synthesizing click at {},{} (canvas {}x{} displayable={} reconnect={})",
 			playAttempts, maxPlayAttempts, CLICK_X, CLICK_Y, canvas.getWidth(), canvas.getHeight(), canvas.isDisplayable(), reconnectAttempts);
 		// FIX-9: on a reconnect the canvas is the resized in-world size (not 765x503), so scale the click to it.
@@ -681,6 +708,15 @@ public final class HeadlessLogin
 		{
 			synthesizeClick(canvas, CLICK_X, CLICK_Y);
 		}
+	}
+
+	/**
+	 * Whether the Auto-login setting's press is due. It takes the plugins being up, then a warmup more so the Default
+	 * World plugin's move has reached the client thread. Only on Play Now: the EULA stays the player's to accept.
+	 */
+	private static boolean launchLoginDue(int loginIndex)
+	{
+		return launchLogin && pluginsStarted && loginIndex == WELCOME_LOGIN_INDEX && ++launchDraws > WARMUP_DRAWS;
 	}
 
 	/** A relog the machine owes the player: recovering a dropped connection, or finishing a world hop. */
@@ -698,6 +734,11 @@ public final class HeadlessLogin
 	{
 		final GameState previous = lastManualState;
 		lastManualState = state;
+		if (state == GameState.LOGGING_IN)
+		{
+			// They beat the launch login to it. It must not fire after a failed login or a logout.
+			launchLogin = false;
+		}
 		if (state == GameState.LOGGED_IN)
 		{
 			manualFailures = 0;

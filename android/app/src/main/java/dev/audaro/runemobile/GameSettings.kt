@@ -162,6 +162,7 @@ fun GameSettingsScreen(onBack: () -> Unit) {
             GsScreenSection()
             GsTouchSection()
             GsGameSection()
+            GsLoginSection()
             GsHapticsSection()
             Spacer(Modifier.heightIn(min = 16.dp))
         }
@@ -265,7 +266,7 @@ internal fun GsSectionHeader(title: String) {
 }
 
 @Composable
-private fun GsSwitchRow(
+internal fun GsSwitchRow(
     label: String,
     detail: String,
     on: Boolean,

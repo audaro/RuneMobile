@@ -62,6 +62,8 @@ import static org.mockito.Mockito.when;
  *       (changeWorld on the login screen), {@code cancelWorldHop} restores idle without stranding state.</li>
  *   <li><b>Manual mode</b>: the login screen belongs to the player, relogs after a drop or for a hop still run, and
  *       repeated failed logins still reach the expired card.</li>
+ *   <li><b>Launch login</b> (the Auto-login setting): one Play Now per launch, after the plugins are up, on the
+ *       world the client is on. A logout never logs the player back in.</li>
  * </ul>
  * Pure: {@link Client} is mocked, the canvas is a bare headless AWT {@link Canvas} (the synthesized clicks go
  * to the toolkit EventQueue and are simply never dispatched). All login state is static, so every test starts
@@ -342,6 +344,124 @@ public class HeadlessLoginTest
 	{
 		tickN(GameState.LOGGING_IN, -1, 2);
 		tickN(GameState.LOGIN_SCREEN, landsOn, 2);
+	}
+
+	private void armLaunchLogin()
+	{
+		HeadlessLogin.setManualForTest(true);
+		HeadlessLogin.setLaunchLoginForTest(true);
+	}
+
+	/** The draws to the press: the warmup is 2, and the draw after it presses. */
+	private static final int LAUNCH_PRESS_TICKS = 3;
+
+	/**
+	 * The Default World plugin moves the client as it starts, and the game is drawing long before that. A press any
+	 * sooner logs the player in on Jagex's default world, which is the bug this setting must not bring back.
+	 */
+	@Test
+	public void launchLoginWaitsForThePlugins()
+	{
+		armLaunchLogin();
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, PLAY_EXHAUST_TICKS);
+		verify(client, never()).getCanvas();
+
+		HeadlessLogin.onPluginsStarted();
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, LAUNCH_PRESS_TICKS - 1);
+		verify(client, never()).getCanvas();
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, 1);
+		verify(client).getCanvas();
+	}
+
+	@Test
+	public void launchLoginKeepsTheWorldTheClientIsOn()
+	{
+		armLaunchLogin();
+		HeadlessLogin.onPluginsStarted();
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, LAUNCH_PRESS_TICKS);
+		verify(client).getCanvas();
+		verify(client, never()).changeWorld(any());
+	}
+
+	@Test
+	public void launchLoginLeavesTheEulaToThePlayer()
+	{
+		armLaunchLogin();
+		HeadlessLogin.onPluginsStarted();
+		tickN(GameState.LOGIN_SCREEN, EULA_LOGIN_INDEX, PLAY_EXHAUST_TICKS);
+		verify(client, never()).getCanvas();
+
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, LAUNCH_PRESS_TICKS);
+		verify(client).getCanvas();
+	}
+
+	@Test
+	public void launchLoginDoesNotComeBackAfterALogout()
+	{
+		armLaunchLogin();
+		HeadlessLogin.onPluginsStarted();
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, LAUNCH_PRESS_TICKS);
+		tickN(GameState.LOGGING_IN, -1, 2);
+		HeadlessLogin.noteSceneDraw();
+		tickN(GameState.LOGGED_IN, -1, 1);
+		clearInvocations(client);
+
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, PLAY_EXHAUST_TICKS);
+		verify(client, never()).getCanvas();
+	}
+
+	/**
+	 * A press that doesn't take leaves the player on Play Now. Retrying could land in a world list they've opened
+	 * since, and running out of retries would show the "Session expired" card over a session that's fine.
+	 */
+	@Test
+	public void launchLoginPressesOnceEvenIfTheScreenStaysOnPlayNow()
+	{
+		armLaunchLogin();
+		HeadlessLogin.onPluginsStarted();
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, LAUNCH_PRESS_TICKS);
+		verify(client).getCanvas();
+		clearInvocations(client);
+
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, PLAY_EXHAUST_TICKS);
+		verify(client, never()).getCanvas();
+		assertFalse("a press that didn't land is not an expired session", HeadlessLogin.hasGivenUp());
+	}
+
+	/** A failed login lands on the player's screen, whichever one it is. It doesn't get a press of its own. */
+	@Test
+	public void launchLoginIsNotRetriedAfterAFailedLogin()
+	{
+		armLaunchLogin();
+		HeadlessLogin.onPluginsStarted();
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, LAUNCH_PRESS_TICKS);
+		clearInvocations(client);
+
+		failedLogin(RECONNECT_LOGIN_INDEX);
+		tickN(GameState.LOGIN_SCREEN, RECONNECT_LOGIN_INDEX, PLAY_EXHAUST_TICKS);
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, PLAY_EXHAUST_TICKS);
+		verify(client, never()).getCanvas();
+	}
+
+	/** The player beat it to the button. */
+	@Test
+	public void launchLoginStandsDownWhenThePlayerLogsInFirst()
+	{
+		armLaunchLogin();
+		tickN(GameState.LOGGING_IN, -1, 2);
+		HeadlessLogin.onPluginsStarted();
+		failedLogin(WELCOME_LOGIN_INDEX);
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, PLAY_EXHAUST_TICKS);
+		verify(client, never()).getCanvas();
+	}
+
+	@Test
+	public void launchLoginStaysOffWhenTheSettingIsOff()
+	{
+		HeadlessLogin.setManualForTest(true);
+		HeadlessLogin.onPluginsStarted();
+		tickN(GameState.LOGIN_SCREEN, WELCOME_LOGIN_INDEX, PLAY_EXHAUST_TICKS);
+		verify(client, never()).getCanvas();
 	}
 
 	/**

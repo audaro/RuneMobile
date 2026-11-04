@@ -18,6 +18,7 @@ FLAG runelite.headless.autologin.cooldown
 FLAG runelite.headless.autologin.eula
 FLAG runelite.headless.autologin.eula.loginIndex
 FLAG runelite.headless.autologin.eula.point
+FLAG runelite.headless.autologin.launch
 FLAG runelite.headless.autologin.legacy
 FLAG runelite.headless.autologin.loginIndex
 FLAG runelite.headless.autologin.manual
@@ -91,6 +92,7 @@ METHOD GrandExchangeBridge#search(String) -> String
 METHOD GrandExchangeBridge#setUiOpen(boolean) -> void
 METHOD GrandExchangeBridge#tick(Client) -> void
 METHOD HeadlessLogin#isEnabled() -> boolean
+METHOD HeadlessLogin#onPluginsStarted() -> void
 METHOD HeadlessLogin#tick(Client,GameState,int) -> void
 METHOD HeadlessResize#cameraZoom() -> int
 METHOD HeadlessResize#isEnabled() -> boolean

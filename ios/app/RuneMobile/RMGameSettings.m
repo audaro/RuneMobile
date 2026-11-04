@@ -11,6 +11,7 @@ static NSString *const kLongPressKey = @"touch.longPressMs";
 static NSString *const kCameraSensitivityKey = @"camera.sensitivity";
 static NSString *const kPortraitKey = @"screen.portrait";
 static NSString *const kAutoRotateKey = @"screen.auto";
+static NSString *const kAutoLoginKey = @"login.auto";
 
 static const NSInteger kLongPressMinMs = 200, kLongPressMaxMs = 1000, kLongPressStepMs = 50, kLongPressDefaultMs = 400;
 static const NSInteger kDragHoldMaxMs = 150;
@@ -44,9 +45,19 @@ static const double kMotionHz = 10.0, kGravitySmoothing = 0.3, kTurnDwell = 0.4;
             kCameraSensitivityKey : @(kCameraSensDefault),
             kPortraitKey : @NO,
             kAutoRotateKey : @NO,
+            kAutoLoginKey : @NO,
         }];
     });
     return [NSUserDefaults standardUserDefaults];
+}
+
++ (BOOL)autoLogin {
+    return [[self defaults] boolForKey:kAutoLoginKey];
+}
+
++ (void)setAutoLogin:(BOOL)on {
+    [[self defaults] setBool:on forKey:kAutoLoginKey];
+    [self changed];
 }
 
 + (void)changed {
@@ -299,6 +310,7 @@ static UIInterfaceOrientationMask maskForGravity(CMAcceleration g, UIInterfaceOr
 typedef NS_ENUM(NSInteger, RMGsSection) { RMGsScreen = 0,
                                           RMGsTouch,
                                           RMGsGame,
+                                          RMGsLogin,
                                           RMGsHaptics };
 
 static NSString *const kHapticTitles[4] = {@"Actions", @"Drag start", @"Menu open", @"Menu rows"};
@@ -362,7 +374,7 @@ enum { kTagLongPress = 1,
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tv {
-    return 4;
+    return 5;
 }
 
 - (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s {
@@ -373,6 +385,8 @@ enum { kTagLongPress = 1,
             return 2; // long-press time, camera sensitivity
         case RMGsGame:
             return self.gameLoaded ? 2 : 0; // idle logout, frame-rate cap
+        case RMGsLogin:
+            return 1; // Auto-login
         case RMGsHaptics:
             return 5; // four triggers + strength
         default:
@@ -388,6 +402,8 @@ enum { kTagLongPress = 1,
             return @"TOUCH";
         case RMGsGame:
             return @"GAME";
+        case RMGsLogin:
+            return @"LOGIN";
         case RMGsHaptics:
             return @"HAPTICS";
         default:
@@ -512,6 +528,17 @@ enum { kTagLongPress = 1,
         seg.accessibilityLabel = @"Frame-rate cap";
         [seg addTarget:self action:@selector(onFpsCap:) forControlEvents:UIControlEventValueChanged];
         [self stackInCell:cell views:@[ name, seg ]];
+    } else if (ip.section == RMGsLogin) {
+        cell.textLabel.text = @"Auto-login";
+        cell.detailTextLabel.text =
+            @"Presses Play Now when the game starts, on your Default World plugin's world. Applies at the next launch.";
+        cell.detailTextLabel.numberOfLines = 0;
+        UISwitch *sw = [[UISwitch alloc] init];
+        sw.on = [RMGameSettings autoLogin];
+        sw.onTintColor = [self accent];
+        sw.accessibilityLabel = @"Auto-login";
+        [sw addTarget:self action:@selector(onAutoLogin:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = sw;
     } else if (ip.row < 4) {
         cell.textLabel.text = kHapticTitles[ip.row];
         cell.detailTextLabel.text = kHapticDetails[ip.row];
@@ -579,6 +606,10 @@ enum { kTagLongPress = 1,
     // The footer explains Auto.
     [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:RMGsScreen]
                   withRowAnimation:UITableViewRowAnimationNone];
+}
+
+- (void)onAutoLogin:(UISwitch *)sw {
+    [RMGameSettings setAutoLogin:sw.on];
 }
 
 - (void)onHapticSwitch:(UISwitch *)sw {

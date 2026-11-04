@@ -1,4 +1,5 @@
 #import "JVMLauncher.h"
+#import "RMGameSettings.h"
 #import <dlfcn.h>
 #import <signal.h>
 #import <pthread.h>
@@ -2441,7 +2442,11 @@ static void RMEnsureResizableDisplayMode(NSString *rlHome, JVMLogSink log) {
             log(@"[jvm] dev autologin ARMED: EULA 302,312 (idx 12) -> Play Now 382,248 -> Click here to play, world 301/oldschool1");
         } else {
             [opts addObject:@"-Drunelite.headless.autologin.manual=true"];
-            log(@"[jvm] login armed: the player presses Play Now; relogs and the welcome screen stay automatic");
+            BOOL autoLogin = [RMGameSettings autoLogin];
+            if (autoLogin)
+                [opts addObject:@"-Drunelite.headless.autologin.launch=true"];
+            log([NSString stringWithFormat:@"[jvm] login armed: %@ presses Play Now; relogs and the welcome screen stay automatic",
+                                           autoLogin ? @"Auto-login" : @"the player"]);
         }
     }
 

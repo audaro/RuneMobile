@@ -14,7 +14,8 @@ typedef NS_ENUM(NSInteger, RMHaptic) {
 extern NSNotificationName const RMGameSettingsDidChangeNotification;
 
 /// The phone-side game settings behind Settings > Game settings. Kept in NSUserDefaults and read live, so a
-/// change applies without a restart.
+/// change applies without a restart. Auto-login is the exception: it decides how the game starts, so it applies
+/// at the next launch.
 @interface RMGameSettings : NSObject
 + (BOOL)hapticOn:(RMHaptic)h; // default YES
 + (void)setHaptic:(RMHaptic)h on:(BOOL)on;
@@ -38,6 +39,9 @@ extern NSNotificationName const RMGameSettingsDidChangeNotification;
 /// Auto: the game turns with the phone (default NO).
 + (BOOL)autoRotate;
 + (void)setAutoRotate:(BOOL)on;
+/// Auto-login: press Play Now when the game starts (default NO, the player logs in).
++ (BOOL)autoLogin;
++ (void)setAutoLogin:(BOOL)on;
 /// The orientations the window may take under the setting.
 + (UIInterfaceOrientationMask)orientationMask;
 /// Turn `window` to the setting now. The game resizes its canvas when the window turns.

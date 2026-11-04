@@ -237,7 +237,7 @@ The full list is in `runProbesWithLog:` in `JVMLauncher.m`. The groups:
 | Renderer | `-Drunelite.routecgpu=true` (GPU), plus `-Drunelite.routecrlhd=true -Drunelite.gfxIos=true` (117 HD) | |
 | Canvas | `-Drunelite.headless.resize=WxH` | |
 | Boot window | `-Dheadless.runSeconds=240`, `-Dheadless.captureTargetFrames=999` | See below. |
-| Login | `autologin` + `autologin.manual`, when `tokens.json` exists | The player presses Play Now. `-RMAutoLogin YES` (the `run-sim.sh` default; `--player-login` turns it off) swaps `.manual` for the unattended login. |
+| Login | `autologin` + `autologin.manual`, when `tokens.json` exists | The player presses Play Now, unless Game settings > Auto-login adds `autologin.launch`. `-RMAutoLogin YES` (the `run-sim.sh` default; `--player-login` turns it off) swaps `.manual` for the unattended login. |
 | Perf probe | `-Drunelite.fpsprobe=true -Xlog:gc,safepoint:…`, `-Drunelite.cpu.unlockfps`, `-Xms` | Armed by marker files; see [Logs](#logs-and-files-on-the-device). |
 
 The bridge properties are listed with their meaning in the [bridge API reference](bridge-api-reference.md).

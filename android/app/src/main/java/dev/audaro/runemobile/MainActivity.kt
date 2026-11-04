@@ -5898,10 +5898,16 @@ class MainActivity : AppCompatActivity() {
         if (autologinArmed && !rlhdPreLogin) {
             opts.addAll(JagexTokens.loginOpts)
             opts.addAll(if (devAutologin) JagexTokens.devAutologinOpts else JagexTokens.playerLoginOpts)
+            val autoLogin = !devAutologin && autoLoginOn(this)
+            if (autoLogin) opts.add("-Drunelite.headless.autologin.launch=true")
             Log.i(
                 TAG,
                 "login ARMED (tokens.json present)${if (rlhd) " [routecrlhd -> RLHDStarter loads 117HD at LOGGED_IN]" else ""}: " +
-                    if (devAutologin) "dev autologin, world 301" else "the player presses Play Now",
+                    when {
+                        devAutologin -> "dev autologin, world 301"
+                        autoLogin -> "Auto-login presses Play Now"
+                        else -> "the player presses Play Now"
+                    },
             )
         } else if (legacyArmed && !rlhdPreLogin) {
             opts.addAll(JagexTokens.loginOpts)

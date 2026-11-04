@@ -18,6 +18,8 @@ as "What's new".
 - **You log in yourself now.** The game stops at the login screen and waits for you to press Play Now, on the world
   you chose. It no longer signs in by itself or forces World 301, so the Default World plugin works, including
   "Use last world". Reconnecting after a dropped connection and hopping worlds are still automatic.
+- **Auto-login is a setting now.** Turn it on in Game settings and the game presses Play Now for you when it starts,
+  on the Default World plugin's world. It's off by default, and logging out always leaves you at the login screen.
 
 ### Fixed
 - **The RuneLite profile you pick stays picked.** It used to go back to the old one at every launch.

@@ -13,7 +13,7 @@ how the bridge works, which thread each call runs on, and how to change it safel
 
 | Classes | Methods | JSON keys | System properties |
 |---:|---:|---:|---:|
-| 23 | 251 | 282 | 79 |
+| 23 | 252 | 282 | 80 |
 
 ## Classes
 
@@ -21,7 +21,7 @@ how the bridge works, which thread each call runs on, and how to change it safel
 - [`DeviceHeadlessBoot`](#deviceheadlessboot): 1 method, 7 properties
 - [`DiagnosticsBridge`](#diagnosticsbridge): 2 methods, 2 JSON keys
 - [`GrandExchangeBridge`](#grandexchangebridge): 6 methods, 16 JSON keys
-- [`HeadlessLogin`](#headlesslogin): 2 methods, 15 properties
+- [`HeadlessLogin`](#headlesslogin): 3 methods, 16 properties
 - [`HeadlessResize`](#headlessresize): 5 methods, 1 property
 - [`HeadlessSeams`](#headlessseams): 3 methods
 - [`HudDataBridge`](#huddatabridge): 4 methods, 27 JSON keys, 2 properties
@@ -117,10 +117,12 @@ Gate 1c-ii / Phase-4 spike: the minimal slice of input injection needed to cross
 **Methods**
 
 - `isEnabled()` → `boolean`
+- `onPluginsStarted()` → `void`  
+  The plugins are up. The game runs well before they do, and the Default World plugin moves the client to the player's world as it starts, so a launch login has to wait for this or it lands on Jagex's default world.
 - `tick(Client client, GameState state, int loginIndex)` → `void`  
   Called once per `Hooks.draw` (only when enabled). Drives the login as a two-stage machine: while the EULA dialog is up (stage 1, optional) it synthesizes an Accept click; once the gamepack reaches the authenticated welcome screen (stage 2) it synthesizes a Play Now click. Each stage re-arms until the state advances.
 
-**System properties read:** `runelite.headless.autologin`, `runelite.headless.autologin.cooldown`, `runelite.headless.autologin.eula`, `runelite.headless.autologin.eula.loginIndex`, `runelite.headless.autologin.eula.point`, `runelite.headless.autologin.legacy`, `runelite.headless.autologin.loginIndex`, `runelite.headless.autologin.manual`, `runelite.headless.autologin.maxAttempts`, `runelite.headless.autologin.point`, `runelite.headless.autologin.warmup`, `runelite.headless.autologin.welcomeX`, `runelite.headless.autologin.welcomeY`, `runelite.headless.autologin.world`, `runelite.headless.autologin.worldAddress`
+**System properties read:** `runelite.headless.autologin`, `runelite.headless.autologin.cooldown`, `runelite.headless.autologin.eula`, `runelite.headless.autologin.eula.loginIndex`, `runelite.headless.autologin.eula.point`, `runelite.headless.autologin.launch`, `runelite.headless.autologin.legacy`, `runelite.headless.autologin.loginIndex`, `runelite.headless.autologin.manual`, `runelite.headless.autologin.maxAttempts`, `runelite.headless.autologin.point`, `runelite.headless.autologin.warmup`, `runelite.headless.autologin.welcomeX`, `runelite.headless.autologin.welcomeY`, `runelite.headless.autologin.world`, `runelite.headless.autologin.worldAddress`
 
 ## `HeadlessResize`
 
@@ -790,6 +792,7 @@ Set with `-D<name>=<value>` in the JVM options each port passes at launch. A `bo
 - `runelite.headless.autologin.eula`: boolean, default `false`. Read by `HeadlessLogin`. Stage 1 (optional): the EULA Accept/Decline dialog a fresh client shows before the welcome screen. Inert on a client that already accepted (desktop) — loginIndex never equals EULA_LOGIN_INDEX there.
 - `runelite.headless.autologin.eula.loginIndex`: int, default `12`. Read by `HeadlessLogin`.
 - `runelite.headless.autologin.eula.point`: string. Read by `HeadlessLogin`.
+- `runelite.headless.autologin.launch`: boolean, default `false`. Read by `HeadlessLogin`. The Auto-login setting: on top of manual, the first Play Now of this launch is pressed for the player.
 - `runelite.headless.autologin.legacy`: boolean, default `false`. Read by `HeadlessLogin`. Legacy (non-Jagex) account mode: instead of the JX_* welcome screen, drive the classic username/password form. The credentials come from the process ENVIRONMENT (set natively before JNI_CreateJavaVM, like the JX_* handoff) — never from -D opts, which get logged. loginIndex 0 is the initial "Welcome to RuneScape" panel (Enter activates the Existing User form); loginIndex 2 is the username/password form (fields set via the Client API, Enter submits). Non-final only for the test seam (setLegacyEnabledForTest) — production never writes it after clinit.
 - `runelite.headless.autologin.loginIndex`: int, default `10`. Read by `HeadlessLogin`. The "logged into a Jagex account, ready to play" welcome screen — the only login sub-state with a Play Now button. (2 = username/password form, 4 = authenticator.)
 - `runelite.headless.autologin.manual`: boolean, default `false`. Read by `HeadlessLogin`. The player logs in; only relogs and the welcome screen stay automated. Both shells set this for real use.

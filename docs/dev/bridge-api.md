@@ -71,7 +71,7 @@ than throwing, so a shell can probe for it safely. Each launcher builds its list
 |---|---|---|
 | Bridge gates | `runelite.bridge`, `runelite.mobileui`, `runelite.mobilechrome`, `runelite.menupeek`, `runelite.hudveneer`, `runelite.huddata`, `runelite.rendererpanel`, `runelite.bridge.scrollrects` | Both ports set the main gates. iOS sets `runelite.huddata` on every boot; Android only in its census mode. Android alone sets `runelite.bridge.scrollrects`. |
 | Boot | `headless.runSeconds`, `headless.captureTargetFrames`, `runelite.nosafemode` | Read by `DeviceHeadlessBoot`. |
-| Login | `runelite.headless.autologin` and its `.manual`, `.legacy`, `.eula`, `.world`, `.maxAttempts`, ... sub-flags | Read by `HeadlessLogin`. Both shells pass `.manual` for players: relogs stay automatic, the login does not. |
+| Login | `runelite.headless.autologin` and its `.manual`, `.launch`, `.legacy`, `.eula`, `.world`, `.maxAttempts`, ... sub-flags | Read by `HeadlessLogin`. Both shells pass `.manual` for players: relogs stay automatic, the login does not. |
 | Renderer | `runelite.routecgpu`, `runelite.routecrlhd`, `runelite.gfxIos`, `runelite.cpu.unlockfps` | Pick and start a renderer; see [renderers.md](renderers.md). |
 | Sizes | `runelite.headless.resize`, `runelite.menupeek.maxEntries` | Initial canvas size; menu entries per snapshot. |
 | Touch tuning | `runelite.touch.*` (slop, timeouts, settle), `runelite.key.pacing` | Defaults are tuned; leave them unset in normal launches. |
