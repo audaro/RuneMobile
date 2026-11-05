@@ -12,9 +12,12 @@ strictly increasing so Android accepts update-in-place; the iOS build stamps the
 same version into the IPA, and the AltStore feed shows this file's section for it
 as "What's new".
 
-## [Unreleased]
+## [0.8.0] - 2026-11-04
 
 ### Changed
+- **Rebuilt on the latest RuneLite and game revision.** Updated to RuneLite 1.13.6 and the current OSRS revision, so
+  the client keeps working after the recent weekly update instead of stopping at a black screen. The plugin catalogue
+  is served for 1.13.6.
 - **You log in yourself now.** The game stops at the login screen and waits for you to press Play Now, on the world
   you chose. It no longer signs in by itself or forces World 301, so the Default World plugin works, including
   "Use last world". Reconnecting after a dropped connection and hopping worlds are still automatic.
