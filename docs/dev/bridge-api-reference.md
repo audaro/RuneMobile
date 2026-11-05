@@ -13,7 +13,7 @@ how the bridge works, which thread each call runs on, and how to change it safel
 
 | Classes | Methods | JSON keys | System properties |
 |---:|---:|---:|---:|
-| 23 | 252 | 282 | 80 |
+| 23 | 252 | 282 | 81 |
 
 ## Classes
 
@@ -34,7 +34,7 @@ how the bridge works, which thread each call runs on, and how to change it safel
 - [`MobileUiBridge`](#mobileuibridge): 63 methods, 15 JSON keys, 1 property
 - [`OverlayBridge`](#overlaybridge): 9 methods, 11 JSON keys
 - [`QuestHelperBridge`](#questhelperbridge): 8 methods, 10 JSON keys
-- [`RLHDStarter`](#rlhdstarter): 2 methods, 1 JSON key, 3 properties
+- [`RLHDStarter`](#rlhdstarter): 2 methods, 1 JSON key, 4 properties
 - [`RuneLiteAccountBridge`](#runeliteaccountbridge): 5 methods, 3 JSON keys
 - [`TimeTrackingBridge`](#timetrackingbridge): 5 methods, 16 JSON keys
 - [`UnsafePokeActivation`](#unsafepokeactivation): 2 methods
@@ -674,7 +674,7 @@ Track G AG3-b — bring up the 117HD (RLHD) plugin (Zone renderer) on the device
 
 **JSON keys emitted:** `ok`
 
-**System properties read:** `runelite.gfxIos`, `runelite.rlhdOverlaySelfTest`, `runelite.routecrlhd`
+**System properties read:** `runelite.gfxIos`, `runelite.rlhdOverlaySelfTest`, `runelite.routecrlhd`, `runelite.routecrlhd.startInWorld`
 
 ## `RuneLiteAccountBridge`
 
@@ -844,6 +844,7 @@ Set with `-D<name>=<value>` in the JVM options each port passes at launch. A `bo
 - `runelite.rlhdOverlaySelfTest`: boolean, default `false`. Read by `RLHDStarter`. PROD-COMPAT-01 bring-up: once 117HD is up, force-compile the dev ShaderOverlay shaders on the live driver so a strict-GLSL-ES typing regression in an overlay surfaces in a device/matrix run (the overlays are dev-toggle-gated and never compile in a default login run). Armed by a pushed marker on Android; off by default.
 - `runelite.routecgpu`: boolean, default `false`. Read by `DeviceHeadlessBoot`, [`RouteCGpuStarter`](../../runelite-client/src/main/java/net/runelite/client/headless/RouteCGpuStarter.java).
 - `runelite.routecrlhd`: boolean, default `false`. Read by `RLHDStarter`.
+- `runelite.routecrlhd.startInWorld`: boolean, default `false`. Read by `RLHDStarter`. iOS only. The login screen there is always the CPU frame: the GL layer is revealed once the world has warmed up, and the CPU frames stop the moment isGpu flips, so 117HD started on the login screen leaves the player looking at a still picture while taps and logins carry on underneath. Android must not set this: 117HD owns its Surface from boot, so nothing else would draw that screen.
 - `runelite.session.url`: string. Read by [`RuneLiteHeadless`](../../runelite-client/src/main/java/net/runelite/client/headless/RuneLiteHeadless.java).
 - `runelite.touch.armSlop`: int, default `4`. Read by `JavaBridge`. How far the lift may land from the arm and still commit it. The engine resolved the ARM point and that is where the click goes, so this stays tight: a finger that slid further gets the full gate at its lift point, exactly as it did before arming existed.
 - `runelite.touch.armedTimeout`: int, default `120`. Read by `JavaBridge`. Drop an arm nobody committed after ~2.4s at 50fps. Not a correctness device -- a later tap replaces an arm anyway -- it stops a settled arm from holding the pointer park off forever.

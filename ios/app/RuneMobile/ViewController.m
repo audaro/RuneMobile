@@ -7395,7 +7395,8 @@ static CGRect mapRectFromArr(NSArray *a) {
     // CLEAR on proof the GPU renderer produced a usable frame; ARM once its boot is underway but hasn't yet, so a
     // boot that dies in GL-init/shader-compile falls back to CPU next launch. The survival proof differs by tier:
     //   - 117HD (direct present): the first GL present (deliberately looser than the sceneWarmedUp reveal below;
-    //     a user quitting at the login screen must not demote). Armed once a CPU boot frame has published.
+    //     a user quitting at the login screen must not demote). Armed once the player is in the game, because 117HD
+    //     starts there: a crash while they sit on the login screen says nothing about it.
     //   - base GPU (readback present): the first blitted frame (framesShown>0) — it never sets gpuPresentArmed nor
     //     presents off-thread, so hasPresentedFrame never fires for it; its readback frame IS the survival proof.
     //     Armed as soon as its boot is running and frameless (before that first readback frame).
@@ -7406,7 +7407,7 @@ static CGRect mapRectFromArr(NSArray *a) {
             self.hdBootCookieArmed = NO;
             self.hdBootCookieSettled = YES;
             [self stampColdStart:@"gpuFirstPresent" line:@"[shell] 117HD first GL present - crash cookie cleared"];
-        } else if (!self.hdBootCookieArmed && !self.appBackgrounded && self.framesShown > 0) {
+        } else if (!self.hdBootCookieArmed && !self.appBackgrounded && self.framesShown > 0 && self.awakeInGame) {
             [self hdBootCookieArm];
             self.hdBootCookieArmed = YES;
             [self appendLine:@"[shell] 117HD boot underway — crash cookie armed (clears on first GL present)"];

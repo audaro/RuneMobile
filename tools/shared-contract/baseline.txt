@@ -69,6 +69,7 @@ FLAG runelite.rendererpanel
 FLAG runelite.rlhdOverlaySelfTest
 FLAG runelite.routecgpu
 FLAG runelite.routecrlhd
+FLAG runelite.routecrlhd.startInWorld
 FLAG runelite.session.url
 FLAG runelite.touch.armSlop
 FLAG runelite.touch.armedTimeout

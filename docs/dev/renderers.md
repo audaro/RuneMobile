@@ -119,6 +119,7 @@ The JVM flags behind them, all read in `runelite-client/src/main/java/net/runeli
 | `runelite.routecgpu` | Arms `RouteCGpuStarter` (base GPU). |
 | `runelite.routecrlhd` | Arms `RLHDStarter` (117 HD). |
 | `runelite.gfxIos` | Tells `RLHDStarter` to apply the iOS 117 HD config branch instead of Android's. |
+| `runelite.routecrlhd.startInWorld` | iOS only. `RLHDStarter` waits for the world instead of starting on the login screen, where iOS shows CPU frames and 117 HD would stop them. Android draws that screen with 117 HD, so it must not set this. |
 | `runelite.rendererpanel` | Loads both GPU plugins into the panel without starting them. |
 | `runelite.nosafemode` | Always set by both launchers. Keeps RuneLite out of safe mode, which would refuse to load GPU plugins. |
 | `runelite.gpuframedump` (+ `.dir`) | Writes every composited in-world GPU frame to `routec-frames/gpuframe-*.png`. Android debug builds set it for GPU and 117 HD boots. Expensive; never ship it on. |

@@ -19,6 +19,7 @@
 #                        rail opens, shows something, and logs no [bridge-fault]
 #   5. renderers         sim-gate/boot-renderer.py per renderer: the client reaches LOGIN_SCREEN on the renderer
 #                        it was asked for (not the crash cookie's CPU fallback) and is still running 15 s later
+#                        (117hd also checks a player's launch: 117HD off, the login screen's picture still moving)
 #   6. log scan          tools/log-scan/log-scan.py over every launch's jvm-stdio.log and hello-shell.log: no line
 #                        that isn't on the known-noise list, and no shader error at all (the list can't excuse one)
 # Every launch is logged out (-RMSkipLogin), so the gate never logs into the game, whatever session the simulator
@@ -231,7 +232,7 @@ else
     rc=$?
     cat "$RUN/renderer-$r.log"
     if [ "$rc" = 0 ] && tail -1 "$RUN/renderer-$r.log" | grep -qx "RENDERER_OK $r"; then
-      record "renderer $r" PASS "$(grep -m1 "^   $r: " "$RUN/renderer-$r.log" | sed "s/^   $r: //")"
+      record "renderer $r" PASS "$(grep "^   $r: " "$RUN/renderer-$r.log" | sed "s/^   $r: //" | paste -sd ";" -)"
       keep_logs "renderer-$r" "$since" yes
     else
       record "renderer $r" FAIL "$(grep -m1 '^!! ' "$RUN/renderer-$r.log" | sed 's/^!! //' | cut -c1-200)"

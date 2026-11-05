@@ -47,6 +47,11 @@ import net.runelite.api.GameState;
 public final class RLHDStarter
 {
 	private static final boolean ENABLED = Boolean.getBoolean("runelite.routecrlhd");
+	// iOS only. The login screen there is always the CPU frame: the GL layer is revealed once the world has warmed up,
+	// and the CPU frames stop the moment isGpu flips, so 117HD started on the login screen leaves the player looking
+	// at a still picture while taps and logins carry on underneath. Android must not set this: 117HD owns its Surface
+	// from boot, so nothing else would draw that screen.
+	private static final boolean START_IN_WORLD = Boolean.getBoolean("runelite.routecrlhd.startInWorld");
 	// PROD-COMPAT-01 bring-up: once 117HD is up, force-compile the dev ShaderOverlay shaders on the live driver so a
 	// strict-GLSL-ES typing regression in an overlay surfaces in a device/matrix run (the overlays are
 	// dev-toggle-gated and never compile in a default login run). Armed by a pushed marker on Android; off by default.
@@ -81,6 +86,12 @@ public final class RLHDStarter
 		return ENABLED;
 	}
 
+	/** Whether 117HD may start in this state: the world, or the login screen unless it has to wait for the world. */
+	static boolean engages(GameState state, boolean startInWorld)
+	{
+		return state == GameState.LOGGED_IN || (state == GameState.LOGIN_SCREEN && !startInWorld);
+	}
+
 	/** Per {@code Hooks.draw}: load + start 117HD once in-world, then force the canvas valid until it activates. */
 	public static void tick(Client client)
 	{
@@ -109,9 +120,9 @@ public final class RLHDStarter
 			return;
 		}
 
-		// Engage once there is a drawing canvas — LOGGED_IN (the 3D world) OR the OSRS LOGIN_SCREEN.
+		// Engage once there is a drawing canvas: LOGGED_IN (the 3D world) or, unless told to wait, the LOGIN_SCREEN.
 		final GameState gs = client.getGameState();
-		if (gs != GameState.LOGGED_IN && gs != GameState.LOGIN_SCREEN)
+		if (!engages(gs, START_IN_WORLD))
 		{
 			return;
 		}

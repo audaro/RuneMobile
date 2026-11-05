@@ -2378,6 +2378,14 @@ static void RMEnsureResizableDisplayMode(NSString *rlHome, JVMLogSink log) {
         // Tell the shared RLHDStarter this is the iOS (Route C / EAGL, full feature port) path, so it applies
         // the full iOS 117HD config (tiled/POM/seeded-tunables/safety) rather than Android's mobile config.
         [opts addObject:@"-Drunelite.gfxIos=true"];
+        // 117HD waits for the world: started on the login screen it would freeze the picture (RLHDStarter says why).
+        // -RM117HDAtLogin YES is for sim-gate, whose logged-out launch has no world to wait for.
+        BOOL hdAtLogin = NO;
+#if TARGET_OS_SIMULATOR
+        hdAtLogin = [[NSUserDefaults standardUserDefaults] boolForKey:@"RM117HDAtLogin"];
+#endif
+        if (!hdAtLogin)
+            [opts addObject:@"-Drunelite.routecrlhd.startInWorld=true"];
         // (The hub's own "117hd" jar can't collide with our staged rs117.hd.HdPlugin — it's blocked in
         // MobileUiBridge.HUB_BLOCKED.)
         log(@"[jvm] GPU Zone (117HD) ARMED (routecrlhd=true)");
