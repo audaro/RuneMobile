@@ -65,5 +65,12 @@
 # Hub pin bumped 1.13.4 -> 1.13.5: the newest release this tree has merged, and it answers on both services.
 # This one is needed, not just allowed: 1.13.5 renamed the FriendsChatChanged event to FriendsChatSync, so a hub
 # build made for 1.13.4 that uses it would fail to load on this client. api.base stays on ${project.version}.
-reviewed_project_version=1.13.6
-pinned_hub_version=1.13.5
+#
+# 2026-11-04 review at project 1.13.7-SNAPSHOT (after merging upstream through 9fc69b64f4, which carries
+# Release 1.13.6), probed with the client's exact URL shapes:
+#   repo.runelite.net/plugins/manifest/<v>_full.js   1.13.5 200 | 1.13.6 200 | 1.13.7 404 | 1.13.7-SNAPSHOT 404
+#   api.runelite.net/runelite-<v>/pluginhub (POST)   1.13.5 200 | 1.13.6 200 | 1.13.7-SNAPSHOT 200
+# Hub pin bumped 1.13.5 -> 1.13.6: the newest release this tree has merged, and it answers on both services.
+# api.base stays on ${project.version}; the -SNAPSHOT path the client requests answers 200.
+reviewed_project_version=1.13.7
+pinned_hub_version=1.13.6
