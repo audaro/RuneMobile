@@ -12,7 +12,7 @@ strictly increasing so Android accepts update-in-place; the iOS build stamps the
 same version into the IPA, and the AltStore feed shows this file's section for it
 as "What's new".
 
-## [0.8.0] - 2026-11-04
+## [0.8.0] - 2026-11-05
 
 ### Changed
 - **Rebuilt on the latest RuneLite and game revision.** Updated to RuneLite 1.13.6 and the current OSRS revision, so
@@ -21,6 +21,7 @@ as "What's new".
 - **You log in yourself now.** The game stops at the login screen and waits for you to press Play Now, on the world
   you chose. It no longer signs in by itself or forces World 301, so the Default World plugin works, including
   "Use last world". Reconnecting after a dropped connection and hopping worlds are still automatic.
+  If the game says you need a members' account, you're on a members world: tap Switch World and pick a free one.
 - **Auto-login is a setting now.** Turn it on in Game settings and the game presses Play Now for you when it starts,
   on the Default World plugin's world. It's off by default, and logging out always leaves you at the login screen.
 - **The orbs follow the game's Show data orbs setting.** With it off, the app used to draw the orbs anyway, and they
