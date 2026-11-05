@@ -3862,6 +3862,8 @@ class MainActivity : AppCompatActivity() {
         if (loginScreen != onLoginScreen) {
             onLoginScreen = loginScreen
             showHotkeyStrip()
+            // The key bar sits on the login screen's world switcher and took its taps, and no key acts there.
+            devBar?.visibility = if (loginScreen) View.GONE else View.VISIBLE
         }
         if (!loggedIn) {
             if (loginScreen) sawLoginScreen = true

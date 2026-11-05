@@ -37,7 +37,10 @@ as "What's new".
 - **Choosing a world on the login screen picks the world you tapped.** It used to pick the row under your previous
   tap, which often ended in "You need a members' account to use this world".
 - **iOS: the pinned keys no longer cover the login screen.** The camera arrows sat on top of the world switcher.
-  Pinned keys and the hotkey strip stand aside until you're in the game; on Android, so does the hotkey strip.
+  Pinned keys and the hotkey strip stand aside until you're in the game.
+- **Android: the world switcher on the login screen works.** The keyboard, Shift and Ctrl keys sat on top of it, so a
+  tap turned on Shift instead of opening the world list. They stand aside until you're in the game, and so does the
+  hotkey strip.
 
 ## [0.7.1] - 2026-11-01
 
