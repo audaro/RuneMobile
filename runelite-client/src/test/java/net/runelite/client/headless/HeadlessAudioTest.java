@@ -188,6 +188,42 @@ public class HeadlessAudioTest
 		line.close();
 	}
 
+	@Test(timeout = 5000)
+	public void flushLeavesWhatTheReaderMayBeCopyingAlone() throws Exception
+	{
+		// The reader takes its positions, then copies. A flush can land between the two, so until it stores readPos
+		// again the bytes it started on aren't free, whatever the line reports to the engine.
+		SourceDataLine line = engineLine(1024);
+		byte[] queued = frames(256, 5);
+		line.write(queued, 0, 1024);
+		line.flush();
+		Assert.assertEquals("the engine sees an empty line", 1024, line.available());
+
+		Assert.assertEquals("nothing may be overwritten yet", 0, line.write(frames(256, 90), 0, 1024));
+		for (int i = 0; i < queued.length; i++)
+		{
+			Assert.assertEquals(queued[i], sink.ring.get(HeadlessAudioLine.DATA + i));
+		}
+
+		Assert.assertEquals("the reader skips what was flushed", 0, sink.consume(4096).length);
+		byte[] fresh = frames(256, 90);
+		Assert.assertEquals(1024, line.write(fresh, 0, 1024));
+		Assert.assertArrayEquals(fresh, sink.consume(4096));
+		line.close();
+	}
+
+	@Test
+	public void flushWithNoReaderFreesTheLineAtOnce() throws Exception
+	{
+		SourceDataLine line = engineLine(1024);
+		line.stop(); // the output is closed by the time stop returns, so nothing can be mid-copy
+		Assert.assertEquals(1024, line.write(frames(256, 1), 0, 2048));
+		line.flush();
+		Assert.assertEquals(1024, line.available());
+		Assert.assertEquals(1024, line.write(frames(256, 2), 0, 2048));
+		line.close();
+	}
+
 	@Test
 	public void aFullLineWithADeadOutputStopsBlockingTheEngine() throws Exception
 	{

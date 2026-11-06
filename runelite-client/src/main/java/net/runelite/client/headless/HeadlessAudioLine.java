@@ -52,6 +52,10 @@ import javax.sound.sampled.SourceDataLine;
  * </pre>
  * The positions never wrap, and a byte lives at {@code DATA + pos % capacity}.
  *
+ * <p>Only readPos frees bytes, because the reader stores it after it has copied them. A flush empties the line as
+ * far as the engine can tell, but the reader may be partway through copying what it discards, so writes wait for it
+ * to move past: one callback at most, and only for a write that needs those bytes.
+ *
  * <p>The engine works out how far ahead it is from {@link #available} alone, so a line that isn't being read
  * must still drain or the engine stops mixing and everything it queued comes out at once later. While a started
  * line has no sink (the app is behind something, the output is muted, or it failed to start) this class
@@ -284,7 +288,7 @@ final class HeadlessAudioLine implements SourceDataLine
 					return written;
 				}
 				service();
-				wrote = Math.min(length - written, freeBytes());
+				wrote = Math.min(length - written, writableBytes());
 				if (wrote > 0)
 				{
 					copyIn(bytes, offset + written, wrote);
@@ -366,9 +370,16 @@ final class HeadlessAudioLine implements SourceDataLine
 		return out;
 	}
 
+	/** How empty the line is, as the engine should see it: a flush counts at once. */
 	private int freeBytes()
 	{
 		return capacity - (int) (writePos - Math.max(position(READ_POS), position(FLUSH_POS)));
+	}
+
+	/** How much can be overwritten, which is only what the reader has finished with. */
+	private int writableBytes()
+	{
+		return capacity - (int) (writePos - position(READ_POS));
 	}
 
 	private long position(int field)
@@ -399,6 +410,10 @@ final class HeadlessAudioLine implements SourceDataLine
 		if (open)
 		{
 			setPosition(FLUSH_POS, writePos);
+			if (sinkHandle == 0)
+			{
+				setPosition(READ_POS, writePos); // closing a sink ends its reads, so nothing can be mid-copy
+			}
 		}
 	}
 
