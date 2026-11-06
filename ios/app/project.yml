@@ -138,6 +138,7 @@ targets:
         HEADER_SEARCH_PATHS:
           - "$(inherited)"
           - "$(SRCROOT)/../dev-tools/gpu-routec/app"
+          - "$(SRCROOT)/../../tools/shared-contract/native"
           - "$(SRCROOT)/../dev-tools/gpu-routec/jni"
           - "$(SRCROOT)/../dev-tools/gpu-zone/jni"
           - "$(SRCROOT)/RuneMobile/jni"

@@ -40,6 +40,10 @@ extern NSNotificationName const RMGameSettingsDidChangeNotification;
 + (BOOL)autoRotate;
 + (void)setAutoRotate:(BOOL)on;
 /// Auto-login: press Play Now when the game starts (default NO, the player logs in).
+/// The master switch for game audio. The boot reads it, so the engine's first line is already muted if it's off.
++ (BOOL)gameSound;
++ (void)setGameSound:(BOOL)on;
+
 + (BOOL)autoLogin;
 + (void)setAutoLogin:(BOOL)on;
 /// The orientations the window may take under the setting.

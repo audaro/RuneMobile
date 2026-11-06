@@ -3434,6 +3434,7 @@ static const int kCamPitchPxPerSec = 200;
 // 15 Hz pump keeps feeding live frames to the (auto-started) Picture-in-Picture window.
 - (void)onEnterBackground {
     [RMResidency noteBackground];
+    [JVMLauncher setGameAudioForeground:NO];
     [JVMLauncher mobileFlushConfig];
     // Reaching the background IS survival, so stop treating the next launch as a crash.
     //
@@ -3507,6 +3508,7 @@ static const int kCamPitchPxPerSec = 200;
 
 - (void)onWillEnterForeground {
     [RMResidency noteForeground];
+    [JVMLauncher setGameAudioForeground:YES];
     self.appBackgrounded = NO; // back in the foreground: an unproven GPU boot may arm its cookie again
     [self stopPipBgPump];
     if (self.bgKeepTask != UIBackgroundTaskInvalid) {

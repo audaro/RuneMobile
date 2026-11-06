@@ -12,6 +12,7 @@ static NSString *const kCameraSensitivityKey = @"camera.sensitivity";
 static NSString *const kPortraitKey = @"screen.portrait";
 static NSString *const kAutoRotateKey = @"screen.auto";
 static NSString *const kAutoLoginKey = @"login.auto";
+static NSString *const kGameSoundKey = @"audio.game";
 
 static const NSInteger kLongPressMinMs = 200, kLongPressMaxMs = 1000, kLongPressStepMs = 50, kLongPressDefaultMs = 400;
 static const NSInteger kDragHoldMaxMs = 150;
@@ -46,9 +47,19 @@ static const double kMotionHz = 10.0, kGravitySmoothing = 0.3, kTurnDwell = 0.4;
             kPortraitKey : @NO,
             kAutoRotateKey : @NO,
             kAutoLoginKey : @NO,
+            kGameSoundKey : @YES,
         }];
     });
     return [NSUserDefaults standardUserDefaults];
+}
+
++ (BOOL)gameSound {
+    return [[self defaults] boolForKey:kGameSoundKey];
+}
+
++ (void)setGameSound:(BOOL)on {
+    [[self defaults] setBool:on forKey:kGameSoundKey];
+    [JVMLauncher setGameAudioMuted:!on];
 }
 
 + (BOOL)autoLogin {
@@ -310,6 +321,7 @@ static UIInterfaceOrientationMask maskForGravity(CMAcceleration g, UIInterfaceOr
 typedef NS_ENUM(NSInteger, RMGsSection) { RMGsScreen = 0,
                                           RMGsTouch,
                                           RMGsGame,
+                                          RMGsSound,
                                           RMGsLogin,
                                           RMGsHaptics };
 
@@ -374,7 +386,7 @@ enum { kTagLongPress = 1,
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tv {
-    return 5;
+    return RMGsHaptics + 1;
 }
 
 - (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s {
@@ -385,6 +397,8 @@ enum { kTagLongPress = 1,
             return 2; // long-press time, camera sensitivity
         case RMGsGame:
             return self.gameLoaded ? 2 : 0; // idle logout, frame-rate cap
+        case RMGsSound:
+            return 1; // Game sound
         case RMGsLogin:
             return 1; // Auto-login
         case RMGsHaptics:
@@ -402,6 +416,8 @@ enum { kTagLongPress = 1,
             return @"TOUCH";
         case RMGsGame:
             return @"GAME";
+        case RMGsSound:
+            return @"SOUND";
         case RMGsLogin:
             return @"LOGIN";
         case RMGsHaptics:
@@ -528,6 +544,16 @@ enum { kTagLongPress = 1,
         seg.accessibilityLabel = @"Frame-rate cap";
         [seg addTarget:self action:@selector(onFpsCap:) forControlEvents:UIControlEventValueChanged];
         [self stackInCell:cell views:@[ name, seg ]];
+    } else if (ip.section == RMGsSound) {
+        cell.textLabel.text = @"Game sound";
+        cell.detailTextLabel.text = @"Music, sound effects and area sounds. Their volumes are in the game's own settings.";
+        cell.detailTextLabel.numberOfLines = 0;
+        UISwitch *sw = [[UISwitch alloc] init];
+        sw.on = [RMGameSettings gameSound];
+        sw.onTintColor = [self accent];
+        sw.accessibilityLabel = @"Game sound";
+        [sw addTarget:self action:@selector(onGameSound:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = sw;
     } else if (ip.section == RMGsLogin) {
         cell.textLabel.text = @"Auto-login";
         cell.detailTextLabel.text =
@@ -606,6 +632,10 @@ enum { kTagLongPress = 1,
     // The footer explains Auto.
     [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:RMGsScreen]
                   withRowAnimation:UITableViewRowAnimationNone];
+}
+
+- (void)onGameSound:(UISwitch *)sw {
+    [RMGameSettings setGameSound:sw.on];
 }
 
 - (void)onAutoLogin:(UISwitch *)sw {

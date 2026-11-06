@@ -207,6 +207,12 @@ typedef NS_ENUM(NSInteger, RMJitScriptCheck) {
 /// The JavaBridge frame seq last enqueued by the feed, -1 before the first. For logs. Any thread.
 + (int)pipFeedSeq;
 
+/// Game audio stops behind other apps. Remembered if the VM isn't up yet. Main thread.
++ (void)setGameAudioForeground:(BOOL)foreground;
+
+/// The player's Game sound switch, live. The boot passes it as -Drunelite.audio.muted. Main thread.
++ (void)setGameAudioMuted:(BOOL)muted;
+
 /// Gate the engine's right-click-menu RASTER (its logic/geometry stay live for click-through). Suppressed
 /// by default on device — the native big-row overlay is the only menu UI; the engine's tiny box only ever
 /// showed as 1-frame flash artifacts. The shell flips it OFF for the native-menu build-timeout fallback

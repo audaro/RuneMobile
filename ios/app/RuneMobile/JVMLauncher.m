@@ -1,4 +1,5 @@
 #import "JVMLauncher.h"
+#import "RMGameAudio.h"
 #import "RMGameSettings.h"
 #import <dlfcn.h>
 #import <signal.h>
@@ -2035,6 +2036,20 @@ static void simBridgeCensusStart(JVMLogSink log) {
     });
 }
 
+// Game audio's two switches. HeadlessAudio hands them to its own thread, so these return at once on the main thread.
+static atomic_bool gGameAudioForeground = true;
+
+static void callGameAudioForeground(JNIEnv *env, BOOL foreground) {
+    jclass local = (*env)->FindClass(env, "net/runelite/client/headless/HeadlessAudio");
+    jmethodID mid = local ? (*env)->GetStaticMethodID(env, local, "setForeground", "(Z)V") : NULL;
+    if (mid)
+        (*env)->CallStaticVoidMethod(env, local, mid, (jboolean)(foreground ? JNI_TRUE : JNI_FALSE));
+    if ((*env)->ExceptionCheck(env))
+        bridgeNoteClear(env, "JVMLauncher.setGameAudioForeground");
+    if (local)
+        (*env)->DeleteLocalRef(env, local);
+}
+
 // Invoke <className>.main(args) on the (already-created) VM. Clears any exception
 // so one probe's failure doesn't poison the next.
 static void callMain(JNIEnv *env, const char *className, NSArray<NSString *> *args, JVMLogSink log) {
@@ -2301,6 +2316,10 @@ static void RMEnsureResizableDisplayMode(NSString *rlHome, JVMLogSink log) {
         [NSString stringWithFormat:@"-Djava.library.path=%@", frameworks],
         [NSString stringWithFormat:@"-Djava.class.path=%@", classpath],
     ] mutableCopy];
+    if (![RMGameSettings gameSound])
+        [opts addObject:@"-Drunelite.audio.muted=true"];
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"RMAudioStats"])
+        [opts addObject:@"-Drunelite.audio.stats=true"]; // dev: a line of audio numbers every 5 s
 
     // Fail fast at heap exhaustion instead of limping (bridge seams no-op, GC thrash) until an
     // untraceable jetsam kill — a clean exit lands in the normal relaunch flow and leaves an hs_err
@@ -2579,6 +2598,12 @@ static void RMEnsureResizableDisplayMode(NSString *rlHome, JVMLogSink log) {
             log([NSString stringWithFormat:@"[jvm] RouteC_registerZoneNatives rc=%d (%@)", zr,
                 zr == 0 ? @"OK" : @"ERR — GLALL/MemoryUtil facade not found"]);
         }
+    }
+
+    if (!self.routecL1Mode) {
+        RMGameAudioRegisterNatives(env);
+        // The player can leave during the boot, before the switch below had a VM to reach.
+        callGameAudioForeground(env, atomic_load(&gGameAudioForeground));
     }
 
 #if TARGET_OS_SIMULATOR
@@ -3379,6 +3404,26 @@ static BOOL pipFeedMarkerSaysMain(void) {
     JNIEnv *env = gMainEnv;
     (*env)->CallStaticVoidMethod(env, gBridgeClass, gMidCamera, (jint)dx, (jint)dy);
     if ((*env)->ExceptionCheck(env)) { bridgeNoteClear(env, "JVMLauncher.postCamera"); }
+}
+
++ (void)setGameAudioForeground:(BOOL)foreground {
+    atomic_store(&gGameAudioForeground, foreground);
+    if (ensureBridge())
+        callGameAudioForeground(gMainEnv, foreground);
+}
+
++ (void)setGameAudioMuted:(BOOL)muted {
+    if (!ensureBridge())
+        return; // no VM yet: the boot reads the setting itself
+    JNIEnv *env = gMainEnv;
+    jclass local = (*env)->FindClass(env, "net/runelite/client/headless/HeadlessAudio");
+    jmethodID mid = local ? (*env)->GetStaticMethodID(env, local, "setMuted", "(Z)V") : NULL;
+    if (mid)
+        (*env)->CallStaticVoidMethod(env, local, mid, (jboolean)(muted ? JNI_TRUE : JNI_FALSE));
+    if ((*env)->ExceptionCheck(env))
+        bridgeNoteClear(env, "JVMLauncher.setGameAudioMuted");
+    if (local)
+        (*env)->DeleteLocalRef(env, local);
 }
 
 + (void)setEngineMenuRenderSuppressed:(BOOL)suppressed {
