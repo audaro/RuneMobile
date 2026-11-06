@@ -288,6 +288,31 @@ Two kinds of input need care:
   covers part of the game (a chat pill, a HUD button) has to pass touches through where the game should get
   them. A bridge fix that works on one port can still be blocked by such a view on the other.
 
+## The audio path
+
+The game makes its own sound. Music, effects and area sounds are all synthesized by the engine and written as one
+22050 Hz stereo stream to a single Java Sound `SourceDataLine`, so there is no MIDI device and nothing per-sound to
+port. Neither JRE has a working Java Sound device, so `HeadlessMixerProvider` supplies the line, registered through
+`META-INF/services`. With no native output bound, as on desktop, it offers nothing and the real devices are used.
+
+- **One ring per started line.** `HeadlessAudioLine` keeps samples in a direct buffer, read by the native callback
+  with `rm_audio_ring.h` (`tools/shared-contract/native/`, shared by both ports). The real-time callback only copies
+  from that ring and never enters the VM.
+- **Outputs.** `game_audio.cpp` opens an AAudio stream (Android), `RMGameAudio.m` a source node on an `AVAudioEngine`
+  (iOS). The system mixes them and converts the rate. Plugins' clips (`HeadlessAudioClip`) are each one more line.
+- **No output doesn't stop the clock.** The engine works out its position from `available()`, and it reopens a line
+  that stops moving. While a line has no output (background, Game sound off, or a failed output) Java drains the ring
+  at the sample rate, so the game keeps time and nothing bursts out afterwards. A failed output is retried every 2 s.
+- **Closing is what makes the ring safe to free.** `nClose` returns only when the callback can no longer touch the
+  ring.
+
+`HeadlessAudio.setForeground` and `setMuted` hand off to their own thread, because opening or closing an output can
+take a moment and they are called from the UI threads.
+
+iOS shares its audio session with the [keepalive](ios.md#backgrounding-and-residency), which is why the game plays
+with the Ring/Silent switch on silent: the keepalive needs the playback category, and changing it around the app's
+lifecycle would put residency at risk for the sake of a switch Game sound already covers.
+
 ## Threading model
 
 The rules are written down in

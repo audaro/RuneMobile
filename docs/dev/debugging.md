@@ -265,6 +265,9 @@ code silently. The ones that help when debugging:
 | `runelite.huddata.dumpSnapshot` | Dumps the full HUD data snapshot. It includes recent chat lines, **private messages too**, so it is opt-in and the output must not be shared unredacted. |
 | `runelite.gatecensus` | Logs `GATE_CENSUS <gate> enabled= live=` once logged in, proving each bridge gate is actually active. Android's census mode sets it. |
 | `runelite.gpuframedump` (+ `.dir`) | Writes each composited in-world GPU frame as a PNG. Android debug builds set it for GPU boots. |
+| `runelite.audio.stats` | Logs each open audio line every 5 s: whether it reaches an output, seconds played, loudest sample. Android debug builds set it from an `audio.stats` marker in the app's external files, iOS from `-RMAudioStats YES`. |
+| `runelite.audio.capture` | `=<file>` writes the game's audio to a WAV instead of a device. On desktop this is how to hear what a phone would play. |
+| `runelite.audio.muted` | Starts with Game sound off. The launchers set it from the saved setting. |
 | `runelite.hover.text` | Restores the desktop hover label, which mobile hides because a touch screen has no hover. |
 | `runelite.key.pacing` | Keyboard pacing for typed input; on by default. |
 | `runelite.headless.autologin.*` | The desktop harness's synthesized login (world, click point, attempts). On a phone `.manual` leaves the login to the player; for an unattended one use `-RMAutoLogin YES` (iOS) or an `autologin.mode` marker in the external files dir (Android debug builds). |

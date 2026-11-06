@@ -651,6 +651,19 @@ or touch.** iOS.
   see [ios.md](ios.md).
 - **In code:** n/a.
 
+### A silent game is usually not a broken output
+
+**Read the audio line before suspecting the output.**
+
+- **Symptom:** no sound, and nothing in the log.
+- **Cause:** the engine obeys its own volumes, which live in `jagexcache/oldschool/LIVE/preferences.dat` and
+  `preferences2.dat`, not in `jagex_cl_oldschool_LIVE.dat`, which only points at the cache folder. Logging in also
+  brings the account's volumes, so an account muted on desktop is muted here. A fresh install adds about 40 s of
+  silence while the music downloads.
+- **What to do:** the bug report's `Audio:` line tells these apart, as does `runelite.audio.stats`. `playing` with a
+  peak of 0 is the game choosing silence; a peak above 0 with `no output` is the output. To test with default volumes
+  on desktop, keep the shared cache but not those two files: make `LIVE` a real folder of per-file symlinks.
+
 ### Phone frame rate is mostly heat
 
 **Compare frame rates only under the same thermal state.**

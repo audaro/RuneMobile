@@ -372,6 +372,7 @@ they exist only in Simulator builds:
 | `-RMSkipLogin YES` | Uses an empty per-launch token file, so a logged-in Simulator stays on the login screen. |
 | `-RMScreenDriver YES` | Lets `sim-screens.py` open native screens by writing `Documents/screen-cmd`. |
 | `-RMBlankGame YES` | Covers the game picture, for stable screenshots. |
+| `-RMAudioStats YES` | Logs a line of audio numbers every 5 s (`runelite.audio.stats`). |
 
 What the Simulator shows and doesn't:
 
@@ -478,6 +479,8 @@ app a few seconds before suspending it, so the app keeps itself running:
 - **Silent audio.** The audio session is set to playback mixed with others, and an `AVAudioEngine` plays a silent
   source node. Handlers restart it after an interruption, a route change or a media-services reset, and a 15 s
   watchdog checks it.
+  Game audio has an engine of its own and stops when the app leaves the foreground, so it can't hold the process
+  awake past the idle release below, and nothing that happens to it can take the keepalive down.
 - **Picture in Picture.** The game can keep running in a PiP window, fed from an `AVSampleBufferDisplayLayer`; a
   background pump feeds it about 15 times a second.
 - **Idle release.** After 10 minutes backgrounded and logged out (`kBgIdleStopSeconds`, skipped while PiP is

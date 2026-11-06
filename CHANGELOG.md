@@ -12,6 +12,14 @@ strictly increasing so Android accepts update-in-place; the iOS build stamps the
 same version into the IPA, and the AltStore feed shows this file's section for it
 as "What's new".
 
+## [Unreleased]
+
+### Added
+- **The game has sound.** Music, sound effects and area sounds now play on both apps, and so do plugins that bring
+  their own sounds. They mix with anything else you're playing, and they stop when you leave the app and come back
+  when you return. Volumes are in the game's own settings, and Game settings > Sound > Game sound turns it all off.
+  On iPhone the game also plays with the Ring/Silent switch on silent, so use Game sound to quiet it.
+
 ## [0.8.0] - 2026-11-05
 
 ### Changed

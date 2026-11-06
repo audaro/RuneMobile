@@ -174,6 +174,8 @@ the other as parity is closed.
 - **RuneLite-account sync (optional).** Sign in to runelite.net and your tuned
   desktop profiles, settings, and hub plugins load automatically.
 - **Fast world hopping** via a relog-based hop.
+- **Sound.** Music, sound effects and area sounds, made by the game itself as on
+  desktop, plus the sounds plugins bring. Game settings > Sound turns it off.
 - **Background survival.** iOS keeps a session connected while backgrounded via a
   picture-in-picture path + silent-audio keepalive.
 
