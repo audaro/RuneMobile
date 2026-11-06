@@ -13,7 +13,7 @@ how the bridge works, which thread each call runs on, and how to change it safel
 
 | Classes | Methods | JSON keys | System properties |
 |---:|---:|---:|---:|
-| 23 | 252 | 282 | 81 |
+| 23 | 252 | 282 | 84 |
 
 ## Classes
 
@@ -776,6 +776,9 @@ Set with `-D<name>=<value>` in the JVM options each port passes at launch. A `bo
 - `headless.captureTargetFrames`: int, default `3`. Read by `DeviceHeadlessBoot`.
 - `headless.runSeconds`: long, default `60`. Read by `DeviceHeadlessBoot`.
 - `java.io.tmpdir`: string, default `"."`. Read by `JavaBridge`.
+- `runelite.audio.capture`: string. Read by [`HeadlessAudio`](../../runelite-client/src/main/java/net/runelite/client/headless/HeadlessAudio.java).
+- `runelite.audio.muted`: boolean, default `false`. Read by [`HeadlessAudio`](../../runelite-client/src/main/java/net/runelite/client/headless/HeadlessAudio.java).
+- `runelite.audio.stats`: boolean, default `false`. Read by [`HeadlessAudio`](../../runelite-client/src/main/java/net/runelite/client/headless/HeadlessAudio.java).
 - `runelite.bridge`: boolean, default `false`. Read by `JavaBridge`.
 - `runelite.bridge.scrollrects`: boolean, default `false`. Read by `JavaBridge`.
 - `runelite.chatreloc`: boolean, default `false`. Read by [`ChatRelocateProbe`](../../runelite-client/src/main/java/net/runelite/client/headless/ChatRelocateProbe.java).

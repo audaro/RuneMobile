@@ -155,6 +155,7 @@ public final class DiagnosticsBridge
 		}
 		sb.append(" | heap ").append((rt.totalMemory() - rt.freeMemory()) >> 20).append('/')
 			.append(rt.maxMemory() >> 20).append(" MB\n");
+		sb.append("Audio: ").append(HeadlessAudio.report()).append('\n');
 
 		final long changedNs = lastCycleChangeNs;
 		if (c != null && changedNs != 0)

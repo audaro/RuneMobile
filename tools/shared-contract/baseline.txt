@@ -1,6 +1,9 @@
 FLAG headless.captureTargetFrames
 FLAG headless.runSeconds
 FLAG java.io.tmpdir
+FLAG runelite.audio.capture
+FLAG runelite.audio.muted
+FLAG runelite.audio.stats
 FLAG runelite.bridge
 FLAG runelite.bridge.scrollrects
 FLAG runelite.chatreloc

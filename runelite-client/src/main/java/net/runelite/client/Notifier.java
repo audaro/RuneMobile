@@ -211,6 +211,10 @@ public class Notifier
 				Toolkit.getDefaultToolkit().beep();
 				break;
 			case CUSTOM:
+				if (net.runelite.client.headless.MobileUiBridge.isEnabled())
+				{
+					break; // the native notification above carries the sound
+				}
 				var n = notification;
 				executorService.submit(() -> tryPlayCustomSound(n));
 		}
