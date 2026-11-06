@@ -72,6 +72,14 @@ static jmethodID g_midSelectMenuPoint = nullptr;
 // AP-2a sticky-Shift: JavaBridge.setShiftHeld(boolean) — synthetic held VK_SHIFT (shared, iOS-device-proven).
 static jmethodID g_midSetShiftHeld = nullptr;
 static jmethodID g_midSetMenuRenderSuppressed = nullptr;
+// Game audio (game_audio.cpp): the shell's two switches on HeadlessAudio. The foreground flag is kept here as well,
+// because a player can leave during the boot, before the bridge exists to tell.
+void registerGameAudioNatives(JNIEnv *env);
+static jclass g_audioCls = nullptr;
+static jmethodID g_midAudioForeground = nullptr;
+static jmethodID g_midAudioMuted = nullptr;
+static std::atomic<bool> g_audioReady{false};
+static std::atomic<bool> g_audioForeground{true};
 // Hotkey chord: JavaBridge.onKeybind(keyCode, modifiers) — posts a matched KEY_PRESSED+KEY_RELEASED so a
 // native per-plugin hotkey button fires the plugin's Keybind. Optional resolve (older jars lack it).
 static jmethodID g_midKeybind = nullptr;
@@ -613,6 +621,16 @@ static std::string toInternal(std::string name) {
     return name;
 }
 
+static void callGameAudio(JNIEnv *env, jmethodID method, bool value) {
+    if (!env || !g_audioReady.load(std::memory_order_acquire))
+        return;
+    env->CallStaticVoidMethod(g_audioCls, method, (jboolean)(value ? JNI_TRUE : JNI_FALSE));
+    if (env->ExceptionCheck()) {
+        env->ExceptionDescribe();
+        env->ExceptionClear();
+    }
+}
+
 // GetEnv-or-daemon-attach for the calling thread. Daemon attach means we never need to detach (the VM
 // won't block on these threads at shutdown, and the process owns teardown). Returns nullptr on failure.
 static JNIEnv *bridgeEnvAttach() {
@@ -756,6 +774,21 @@ static bool publishBridge(JNIEnv *env) {
     } else {
         env->ExceptionClear();
         LOGE("bridge: FindClass DiagnosticsBridge failed (Share logs has no engine section)");
+    }
+
+    // Game audio: best-effort like the facades below (a miss only leaves the game silent, as it was).
+    registerGameAudioNatives(env);
+    jclass au = env->FindClass("net/runelite/client/headless/HeadlessAudio");
+    if (au && !env->ExceptionCheck()) {
+        g_audioCls = (jclass)env->NewGlobalRef(au);
+        env->DeleteLocalRef(au);
+        g_midAudioForeground = g_audioCls ? midOpt(env, g_audioCls, "setForeground", "(Z)V") : nullptr;
+        g_midAudioMuted = g_audioCls ? midOpt(env, g_audioCls, "setMuted", "(Z)V") : nullptr;
+        g_audioReady.store(g_audioCls && g_midAudioForeground && g_midAudioMuted, std::memory_order_release);
+        callGameAudio(env, g_midAudioForeground, g_audioForeground.load(std::memory_order_acquire));
+    } else {
+        env->ExceptionClear();
+        LOGE("bridge: FindClass HeadlessAudio failed (no game audio)");
     }
 
     // A2: MenuPeekBridge is a SEPARATE facade — resolve best-effort so a missing/old one only disables menu-peek
@@ -1956,6 +1989,16 @@ Java_dev_audaro_runemobile_JvmLauncher_nativeSetAltHeld(JNIEnv *, jobject, jbool
 extern "C" JNIEXPORT void JNICALL
 Java_dev_audaro_runemobile_JvmLauncher_nativeSetMenuRenderSuppressed(JNIEnv *, jobject, jboolean suppressed) {
     enqueue({IN_MENU_SUPPRESS, suppressed ? 1 : 0, 0, 0, 0});
+}
+// Game audio stops behind other apps.
+extern "C" JNIEXPORT void JNICALL
+Java_dev_audaro_runemobile_JvmLauncher_nativeSetGameAudioForeground(JNIEnv *, jobject, jboolean foreground) {
+    g_audioForeground.store(foreground == JNI_TRUE, std::memory_order_release);
+    callGameAudio(bridgeEnvAttach(), g_midAudioForeground, foreground == JNI_TRUE);
+}
+extern "C" JNIEXPORT void JNICALL
+Java_dev_audaro_runemobile_JvmLauncher_nativeSetGameAudioMuted(JNIEnv *, jobject, jboolean muted) {
+    callGameAudio(bridgeEnvAttach(), g_midAudioMuted, muted == JNI_TRUE);
 }
 extern "C" JNIEXPORT void JNICALL
 Java_dev_audaro_runemobile_JvmLauncher_nativeMiddleClick(JNIEnv *, jobject, jint x, jint y) {

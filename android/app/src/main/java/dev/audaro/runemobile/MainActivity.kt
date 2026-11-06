@@ -5416,6 +5416,7 @@ class MainActivity : AppCompatActivity() {
         // PERF-BATTERY-NETWORK-01: returning to the foreground — un-throttle the render thread and re-arm the
         // per-frame UI poll. Guarded by pollingPaused so the FIRST onStart (right after onCreate's
         // startInputPolling already posted the callback) doesn't double-post it.
+        JvmLauncher.onBridge { JvmLauncher.nativeSetGameAudioForeground(true) }
         if (pollingPaused) {
             pollingPaused = false
             JvmLauncher.setPaused(false)
@@ -5441,6 +5442,7 @@ class MainActivity : AppCompatActivity() {
         // PERF-BATTERY-NETWORK-01: not visible — drop the render thread to 4 Hz and stop the per-frame UI poll
         // (updateChrome/applyOverlayInsets/updateWorldMap/IME). Android has no PiP keepalive (iOS-only), so
         // standing the engine work down backgrounded has no on-device consumer to starve.
+        JvmLauncher.onBridge { JvmLauncher.nativeSetGameAudioForeground(false) }
         pollingPaused = true
         JvmLauncher.setPaused(true)
         frameCallback?.let { Choreographer.getInstance().removeFrameCallback(it) }
@@ -5893,6 +5895,8 @@ class MainActivity : AppCompatActivity() {
         // an automated login would churn at state=UNKNOWN forever instead of settling at LOGIN_SCREEN, so the Zone
         // shader-compile proof needs the clean login screen.
         val rlhdPreLogin = rlhd && devMarker("rlhd_prelogin.mode")
+        if (!gameSoundOn(this)) opts.add("-Drunelite.audio.muted=true")
+        if (devMarker("audio.stats")) opts.add("-Drunelite.audio.stats=true") // dev: a line of audio numbers every 5 s
         // The dev gates can't tap: an autologin.mode marker or a census gets the unattended login, debug builds only.
         val devAutologin =
             BuildConfig.DEBUG &&

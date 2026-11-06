@@ -68,6 +68,12 @@ object JvmLauncher {
     // PERF-BATTERY-NETWORK-01: visibility gate. Paused (backgrounded) -> the render thread idles at 4 Hz.
     external fun nativeSetPaused(paused: Boolean)
 
+    /** Game audio stops behind other apps. Remembered if the VM isn't up yet. Call through [onBridge]. */
+    external fun nativeSetGameAudioForeground(foreground: Boolean)
+
+    /** The player's Game sound switch, live. The boot passes it as -Drunelite.audio.muted. Call through [onBridge]. */
+    external fun nativeSetGameAudioMuted(muted: Boolean)
+
     /** A discrete tap at game-canvas (x,y); button 1 = left (walk/interact), 3 = long-press menu. */
     external fun nativeClick(
         x: Int,

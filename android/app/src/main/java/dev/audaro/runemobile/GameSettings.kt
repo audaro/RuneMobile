@@ -162,6 +162,7 @@ fun GameSettingsScreen(onBack: () -> Unit) {
             GsScreenSection()
             GsTouchSection()
             GsGameSection()
+            GsAudioSection()
             GsLoginSection()
             GsHapticsSection()
             Spacer(Modifier.heightIn(min = 16.dp))
