@@ -13,7 +13,7 @@ how the bridge works, which thread each call runs on, and how to change it safel
 
 | Classes | Methods | JSON keys | System properties |
 |---:|---:|---:|---:|
-| 23 | 252 | 282 | 84 |
+| 23 | 253 | 282 | 84 |
 
 ## Classes
 
@@ -31,7 +31,7 @@ how the bridge works, which thread each call runs on, and how to change it safel
 - [`LootTrackerBridge`](#loottrackerbridge): 6 methods, 14 JSON keys
 - [`MenuPeekBridge`](#menupeekbridge): 5 methods, 23 JSON keys, 2 properties
 - [`MobileChromeBridge`](#mobilechromebridge): 5 methods, 22 JSON keys, 1 property
-- [`MobileUiBridge`](#mobileuibridge): 63 methods, 15 JSON keys, 1 property
+- [`MobileUiBridge`](#mobileuibridge): 64 methods, 15 JSON keys, 1 property
 - [`OverlayBridge`](#overlaybridge): 9 methods, 11 JSON keys
 - [`QuestHelperBridge`](#questhelperbridge): 8 methods, 10 JSON keys
 - [`RLHDStarter`](#rlhdstarter): 2 methods, 1 JSON key, 4 properties
@@ -593,6 +593,8 @@ Phase-6 (W3): the second reverse-JNI facade — the *Java-owned* mobile-UI contr
   Write one config value (already serialized to its string form by the native control), queued onto the client thread — the desktop fires `ConfigChanged` synchronously, so this guarantees subscribers run where game-touching ones expect to be. The resulting `ConfigChanged` is the confirmation.
 - `setFpsCap(int fps)` → `String`  
   Cap the frame rate through the FPS Control plugin, turning the plugin on if it is off. 0 removes the cap.
+- `setHeatFpsCap(int fps)` → `String`  
+  Limit the frame rate while the phone is hot or saving power, on top of any cap the player chose. 0 lifts it. Unlike `setFpsCap(int)` this is held in memory and saves nothing to the player's profile, so the Game settings screen doesn't show it and a session that dies can't leave it behind. The host sets it again each launch.
 - `setIdleLogoutMinutes(int minutes)` → `String`  
   Set the idle logout time through the Logout Timer plugin, turning the plugin on if it is off. In minutes.
 - `setPinned(String pluginName, boolean pinned)` → `String`  

@@ -284,6 +284,7 @@ METHOD MobileUiBridge#resetPluginConfig(String) -> String
 METHOD MobileUiBridge#rlhdOverlaySelfTest() -> String
 METHOD MobileUiBridge#setConfig(String,String,String) -> String
 METHOD MobileUiBridge#setFpsCap(int) -> String
+METHOD MobileUiBridge#setHeatFpsCap(int) -> String
 METHOD MobileUiBridge#setIdleLogoutMinutes(int) -> String
 METHOD MobileUiBridge#setPinned(String,boolean) -> String
 METHOD MobileUiBridge#setPluginEnabled(String,boolean) -> String

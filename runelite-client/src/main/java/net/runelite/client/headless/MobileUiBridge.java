@@ -83,6 +83,7 @@ import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.PluginInstantiationException;
 import net.runelite.client.plugins.PluginManager;
+import net.runelite.client.ui.DrawManager;
 import net.runelite.client.ui.NavigationButton;
 
 /**
@@ -2044,6 +2045,7 @@ public final class MobileUiBridge
 	static final int FPS_CAP_DEFAULT = 50;   // its default target
 	static final int IDLE_MIN_MINUTES = 5;   // the Logout Timer plugin's own range; 5 is also the game's default
 	static final int IDLE_MAX_MINUTES = 30;
+	private static final HeatFrameCap HEAT_FRAME_CAP = new HeatFrameCap();
 
 	/**
 	 * The frame-rate cap and idle logout time the native Game settings screen shows, read from the FPS Control and
@@ -2071,6 +2073,23 @@ public final class MobileUiBridge
 			return "{\"ok\":false,\"reason\":\"facade-off\"}";
 		}
 		return applyGameSetting(FPS_PLUGIN, fpsCapWrites(fps, pluginOn(FPS_PLUGIN)), fps > 0);
+	}
+
+	/**
+	 * Limit the frame rate while the phone is hot or saving power, on top of any cap the player chose. 0 lifts it.
+	 * Unlike {@link #setFpsCap(int)} this is held in memory and saves nothing to the player's profile, so the Game
+	 * settings screen doesn't show it and a session that dies can't leave it behind. The host sets it again each launch.
+	 */
+	public static String setHeatFpsCap(int fps)
+	{
+		final com.google.inject.Injector inj = RuneLite.getInjector();
+		if (!ENABLED || inj == null)
+		{
+			return "{\"ok\":false,\"reason\":\"facade-off\"}";
+		}
+		inj.getInstance(DrawManager.class).registerEveryFrameListener(HEAT_FRAME_CAP);
+		HEAT_FRAME_CAP.setFps(fps);
+		return "{\"ok\":true}";
 	}
 
 	/** Set the idle logout time through the Logout Timer plugin, turning the plugin on if it is off. In minutes. */
