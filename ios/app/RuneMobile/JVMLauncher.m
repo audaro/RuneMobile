@@ -103,6 +103,7 @@ static jmethodID gMuiListPanels = NULL;   // listPanels()Ljava/lang/String;
 static jmethodID gMuiNotesAvail = NULL;   // notesAvailable()Z  (native Notes panel)
 static jmethodID gMuiGameSettings = NULL; // gameSettings()Ljava/lang/String;  (native Game settings)
 static jmethodID gMuiSetFpsCap = NULL;    // setFpsCap(I)Ljava/lang/String;
+static jmethodID gMuiGameThreadCpuNanos = NULL; // gameThreadCpuNanos()J
 static jmethodID gMuiSetHeatFpsCap = NULL; // setHeatFpsCap(I)Ljava/lang/String;
 static jmethodID gMuiSetIdleLogout = NULL; // setIdleLogoutMinutes(I)Ljava/lang/String;
 static jmethodID gMuiNotesGet = NULL;     // notesGet()Ljava/lang/String;
@@ -762,6 +763,11 @@ static BOOL ensureMui(void) {
     if ((*env)->ExceptionCheck(env)) {
         (*env)->ExceptionClear(env);
         gMuiSetFpsCap = NULL;
+    }
+    gMuiGameThreadCpuNanos = (*env)->GetStaticMethodID(env, global, "gameThreadCpuNanos", "()J");
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        gMuiGameThreadCpuNanos = NULL;
     }
     gMuiSetHeatFpsCap = (*env)->GetStaticMethodID(env, global, "setHeatFpsCap", "(I)Ljava/lang/String;");
     if ((*env)->ExceptionCheck(env)) {
@@ -3968,6 +3974,18 @@ static NSString *noteConfigWrite(NSString *ack) {
         return nil;
     JNIEnv *env = gMainEnv;
     return jstringToNS(env, (jstring)(*env)->CallStaticObjectMethod(env, gMuiClass, gMuiSetFpsCap, (jint)fps));
+}
+
++ (long long)gameThreadCpuNanos {
+    if (!ensureMui() || !gMuiGameThreadCpuNanos)
+        return -1;
+    JNIEnv *env = gMainEnv;
+    jlong nanos = (*env)->CallStaticLongMethod(env, gMuiClass, gMuiGameThreadCpuNanos);
+    if ((*env)->ExceptionCheck(env)) {
+        bridgeNoteClear(env, "JVMLauncher.gameThreadCpuNanos");
+        return -1;
+    }
+    return (long long)nanos;
 }
 
 + (BOOL)setHeatFpsCap:(int)fps {

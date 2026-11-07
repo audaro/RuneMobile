@@ -13,7 +13,7 @@ how the bridge works, which thread each call runs on, and how to change it safel
 
 | Classes | Methods | JSON keys | System properties |
 |---:|---:|---:|---:|
-| 23 | 253 | 282 | 84 |
+| 23 | 254 | 282 | 84 |
 
 ## Classes
 
@@ -31,7 +31,7 @@ how the bridge works, which thread each call runs on, and how to change it safel
 - [`LootTrackerBridge`](#loottrackerbridge): 6 methods, 14 JSON keys
 - [`MenuPeekBridge`](#menupeekbridge): 5 methods, 23 JSON keys, 2 properties
 - [`MobileChromeBridge`](#mobilechromebridge): 5 methods, 22 JSON keys, 1 property
-- [`MobileUiBridge`](#mobileuibridge): 64 methods, 15 JSON keys, 1 property
+- [`MobileUiBridge`](#mobileuibridge): 65 methods, 15 JSON keys, 1 property
 - [`OverlayBridge`](#overlaybridge): 9 methods, 11 JSON keys
 - [`QuestHelperBridge`](#questhelperbridge): 8 methods, 10 JSON keys
 - [`RLHDStarter`](#rlhdstarter): 2 methods, 1 JSON key, 4 properties
@@ -495,6 +495,8 @@ Phase-6 (W3): the second reverse-JNI facade — the *Java-owned* mobile-UI contr
   Persist the dirty config, but QUEUED on the client thread so it runs AFTER any setConfig writes enqueued just before it (sendConfig itself is immediate; ordering matters when seeding defaults then flushing). Returns a write id: once `getProcessedWriteId()` reaches it, the file is written.
 - `gameSettings()` → `String`  
   The frame-rate cap and idle logout time the native Game settings screen shows, read from the FPS Control and Logout Timer plugins: `{"fpsCap":N,"idleLogoutMinutes":M}`, where fpsCap 0 means no cap. "" when the facade is off.
+- `gameThreadCpuNanos()` → `long`  
+  Nanoseconds the game thread has spent on a CPU since it started, or -1 if that can't be read yet. Native code takes the difference between two readings for the Heat section of Share logs.
 - `geAvailable()` → `boolean`  
   Whether the native shell should offer the native Grand Exchange screen (the GE plugin is loaded).
 - `geJson()` → `String`  

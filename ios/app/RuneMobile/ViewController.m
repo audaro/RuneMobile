@@ -39,6 +39,10 @@
 // taps above/below a tab still register on that column. Purely a hit-test grow — the visible sprite is unchanged.
 static const CGFloat kChatTabTouchExpand = 15.0;     // screen pt added above each tab's touch rect
 static const CGFloat kChatTabTouchExpandBelow = 4.0; // and below it, short of the chat's top line
+// A new install's starting settings, and the flag that they are still to be set. See applyNewInstallDefaults.
+static NSString *const kNewInstallDefaultsKey = @"newInstallDefaults";
+static const int kNewInstallFpsCap = 30;
+static NSString *const kNewInstallDrawDistance = @"30";    // base GPU's, down from the plugin's 50
 static const unsigned long long kShellLogCap = 8ull << 20; // hello-shell.log bytes per launch (appendLine)
 @interface ChatTabButton : UIButton
 @end
@@ -668,6 +672,11 @@ static NSString *RMPasteLine(NSString *s) {
 @property (nonatomic, assign) int heatFpsLimit;         // the frame-rate limit the game last accepted, 0 for none
 @property (nonatomic, assign) long heatEngineFrames;    // the engine's frame counter at the last reading
 @property (nonatomic, assign) long heatPresentedFrames; // the direct present's, likewise
+@property (nonatomic, assign) long long heatGameCpuNanos; // the game thread's CPU, likewise
+@property (nonatomic, assign) long heatGpuWaitNanos;      // its time waiting for the GPU, likewise
+@property (nonatomic, assign) double heatAppCpuSeconds;   // the whole app's CPU, likewise
+@property (nonatomic, assign) BOOL newInstallQueued;      // this launch has queued a new install's settings
+@property (nonatomic, assign) long long newInstallSaveId; // the save behind them, 0 until it's queued
 @property (nonatomic, strong) UIView *pluginPanel;
 @property (nonatomic, strong) UITableView *pluginTable;
 @property (nonatomic, strong) NSArray<NSDictionary *> *pluginList;  // the FILTERED view the table renders
@@ -1555,6 +1564,7 @@ static NSString *const kLayoutNoticeBody =
         // autoGpuFailed latches re-promotion off once a promoted boot has failed.
         pref = [GLRecon recommendedRendererTier];
         [ud setObject:pref forKey:@"rendererPref"];
+        [ud setBool:YES forKey:kNewInstallDefaultsKey];
         [self appendLine:[NSString stringWithFormat:@"[shell] auto-GPU: first-run caps probe -> default renderer %@", pref]];
     }
     if (pref == nil)
@@ -5916,8 +5926,8 @@ static int simHeatLowPower = -1;
 #endif
 
 // One look at the phone: sets the limits its heat calls for, and leaves a reading for Share logs. See the property
-// block for the contract. Cheap: a frame-counter read and an enum compare, plus a bridge write on a change, and on
-// 117HD a read of its config while a limit is in force.
+// block for the contract. Cheap: counter reads and an enum compare, plus a bridge write on a change, and on 117HD a read
+// of its config while a limit is in force.
 - (void)heatTick {
     NSProcessInfo *pi = [NSProcessInfo processInfo];
     NSInteger thermal = pi.thermalState;
@@ -5952,18 +5962,56 @@ static int simHeatLowPower = -1;
     long frames = MAX(seq - self.heatEngineFrames, presents - self.heatPresentedFrames);
     self.heatEngineFrames = seq;
     self.heatPresentedFrames = presents;
+    long long gameCpu = [JVMLauncher gameThreadCpuNanos]; // -1 until the game can say
+    long gpuWait = [RouteCBridge gpuWaitNanos];
+    double appCpu = RMAppCpuSeconds();
     RMHeatReading reading = {
         .thermalState = thermal,
         .lowPower = lowPower,
         .background = self.appBackgrounded,
         .frames = (int)frames,
+        .gameCpuSeconds = gameCpu >= 0 && self.heatGameCpuNanos >= 0 ? (gameCpu - self.heatGameCpuNanos) / 1e9 : -1,
+        .gpuWaitSeconds = (gpuWait - self.heatGpuWaitNanos) / 1e9,
+        .appCpuSeconds = MAX(appCpu - self.heatAppCpuSeconds, 0),
         .batteryState = (int)device.batteryState,
         .batteryLevel = device.batteryLevel,
         .fpsLimit = self.heatFpsLimit,
         .scalePercent = self.pendingRouteCZone ? self.heatScaleKeeper.appliedScale : 0,
         .baselineScale = self.pendingRouteCZone ? self.heatScaleKeeper.baselineScale : 0,
     };
+    self.heatGameCpuNanos = gameCpu;
+    self.heatGpuWaitNanos = gpuWait;
+    self.heatAppCpuSeconds = appCpu;
     [RMHeatLog.shared addReading:reading at:now];
+    [self applyNewInstallDefaults];
+}
+
+// A new install starts light, on settings the player can raise: a frame-rate cap, set the way Game settings sets one so
+// the screen shows it, and a shorter draw distance on base GPU, the renderer it starts on. They're set from here because
+// only a first run raises the flag, so nobody already playing is moved. A sentinel in the profile can't promise that:
+// RouteCGpuStarter stops at isGpu() before its seed, so an old profile can be missing one.
+//
+// The flag stays until they're on disk, so a kill partway through gets another go. FPS Control has to load first, which
+// is well after the first ticks, so the writes keep trying. An ok only means queued, and the plugin turns on later, on
+// the EDT, so the save waits for the cap to read back as in force, or it could land with the plugin still off.
+- (void)applyNewInstallDefaults {
+    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+    if (![ud boolForKey:kNewInstallDefaultsKey])
+        return;
+    if (!self.newInstallQueued) {
+        NSString *distance = [JVMLauncher mobileSetConfigGroup:@"gpu" key:@"drawDistance" value:kNewInstallDrawDistance];
+        self.newInstallQueued = [distance hasPrefix:@"{\"ok\":true"] &&
+                                [[JVMLauncher setFpsCap:kNewInstallFpsCap] hasPrefix:@"{\"ok\":true"];
+    } else if (self.newInstallSaveId == 0) {
+        NSData *data = [[JVMLauncher gameSettings] dataUsingEncoding:NSUTF8StringEncoding];
+        NSDictionary *settings = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
+        if ([settings isKindOfClass:[NSDictionary class]] && [settings[@"fpsCap"] intValue] == kNewInstallFpsCap)
+            self.newInstallSaveId = [JVMLauncher mobileFlushConfig];
+    } else if ([JVMLauncher mobileProcessedWriteId] >= self.newInstallSaveId) {
+        [ud removeObjectForKey:kNewInstallDefaultsKey];
+        [self appendLine:[NSString stringWithFormat:@"[shell] new install: frame-rate cap %d, draw distance %@ saved",
+                                                    kNewInstallFpsCap, kNewInstallDrawDistance]];
+    }
 }
 
 // Queues sceneResolutionScale. NO if the bridge didn't take it.
@@ -9997,6 +10045,7 @@ static CGRect mapRectFromArr(NSArray *a) {
 //              ios/dev-tools/diagnostics/sim-report-check.py and sim-heat-check.py.
 //   heat       stands in for the phone's thermal state and Low Power Mode, for sim-heat-check.py.
 //   hd-scale   moves 117HD's resolution setting the way its slider does, likewise.
+//   fps-cap    sets the frame-rate cap the way Game settings does, likewise.
 //   config-flush saves the config now, likewise.
 
 static NSString *simScreenSeq;    // the last command's seq
@@ -10096,6 +10145,12 @@ static const CFTimeInterval kSimConfirmTimeout = 15.0;
     // "hd-scale <percent>": move 117HD's resolution setting the way its slider does.
     if ([name hasPrefix:@"hd-scale "]) {
         [JVMLauncher mobileSetConfigGroup:@"hd" key:@"sceneResolutionScale" value:[name substringFromIndex:9]];
+        [self appendLine:[NSString stringWithFormat:@"[screen] ready %@ %@", seq, name]];
+        return;
+    }
+    // "fps-cap <fps>": set the frame-rate cap the way Game settings does, 0 for none.
+    if ([name hasPrefix:@"fps-cap "]) {
+        [JVMLauncher setFpsCap:[name substringFromIndex:8].intValue];
         [self appendLine:[NSString stringWithFormat:@"[screen] ready %@ %@", seq, name]];
         return;
     }

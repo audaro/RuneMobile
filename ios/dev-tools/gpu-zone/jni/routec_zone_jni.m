@@ -45,7 +45,11 @@
 // ============================================================================================================
 
 static void JNICALL z_glCullFace(JNIEnv *e, jclass c, jint a0) { glCullFace((GLenum)a0); }
-static void JNICALL z_glFinish(JNIEnv *e, jclass c) { glFinish(); }
+static void JNICALL z_glFinish(JNIEnv *e, jclass c) {
+    double t0 = rc_now_seconds();
+    glFinish();
+    [RouteCBridge noteGpuWait:rc_now_seconds() - t0];
+}
 static void JNICALL z_glFlush(JNIEnv *e, jclass c) { glFlush(); }
 static void JNICALL z_glVertexAttribDivisor(JNIEnv *e, jclass c, jint a0, jint a1) { glVertexAttribDivisor((GLuint)a0, (GLuint)a1); }
 
@@ -118,7 +122,10 @@ static jlong JNICALL z_glFenceSync(JNIEnv *e, jclass c, jint cond, jint flags) {
     return (jlong)(intptr_t)glFenceSync((GLenum)cond, (GLbitfield)flags);
 }
 static jint JNICALL z_glClientWaitSync(JNIEnv *e, jclass c, jlong sync, jint flags, jlong timeout) {
-    return (jint)glClientWaitSync((GLsync)(intptr_t)sync, (GLbitfield)flags, (GLuint64)timeout);
+    double t0 = rc_now_seconds();
+    jint result = (jint)glClientWaitSync((GLsync)(intptr_t)sync, (GLbitfield)flags, (GLuint64)timeout);
+    [RouteCBridge noteGpuWait:rc_now_seconds() - t0];
+    return result;
 }
 static void JNICALL z_glDeleteSync(JNIEnv *e, jclass c, jlong sync) { glDeleteSync((GLsync)(intptr_t)sync); }
 

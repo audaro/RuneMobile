@@ -1,4 +1,5 @@
 #import "RMHeat.h"
+#import <sys/resource.h>
 
 // By thermal state. The frame rate is the first lever because it works on every renderer and saves nothing to the
 // player's settings. 117HD's scale is a saved setting, so it stays for the states where the phone is throttling.
@@ -186,6 +187,18 @@ static NSString *batteryText(const RMHeatReading *r) {
     }
 }
 
+double RMAppCpuSeconds(void) {
+    struct rusage usage;
+    if (getrusage(RUSAGE_SELF, &usage) != 0)
+        return 0;
+    return usage.ru_utime.tv_sec + usage.ru_stime.tv_sec + (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1e6;
+}
+
+// Milliseconds a frame, or "-" for a reading that couldn't be taken.
+static NSString *msText(double ms) {
+    return ms >= 0 ? [NSString stringWithFormat:@"%.1f", ms] : @"-";
+}
+
 @implementation RMHeatLog {
     NSMutableArray<NSString *> *_lines;
     NSUInteger _dropped;
@@ -198,6 +211,13 @@ static NSString *batteryText(const RMHeatReading *r) {
     long _windowFrames;
     NSInteger _windowHottest;
     BOOL _windowBackground;
+    double _windowAppCpu;
+    // Frame timing covers the time on screen: time in the background draws nothing, so it would pass for slow frames.
+    double _windowTimedSeconds, _windowGameCpu, _windowGpuWait;
+    long _windowTimedFrames;
+    long _windowGameFrames; // the frames _windowGameCpu covers, since the game thread can't always be read
+    // The slowest reading of the minute, in ms a frame: a crowd or a hitch hardly moves a minute's average.
+    double _slowestFrameMs, _slowestGameCpuMs, _slowestGpuWaitMs;
 }
 
 + (RMHeatLog *)shared {
@@ -246,20 +266,51 @@ static NSString *batteryText(const RMHeatReading *r) {
         _windowFrames += r.frames;
         _windowHottest = MAX(_windowHottest, r.thermalState);
         _windowBackground = _windowBackground || r.background;
+        _windowAppCpu += r.appCpuSeconds;
+        if (!r.background)
+            [self noteTiming:r over:gap];
         if (_windowSeconds >= kLineSeconds)
             [self closeWindowAt:now];
     }
 }
 
+- (void)noteTiming:(RMHeatReading)r over:(NSTimeInterval)gap {
+    _windowTimedSeconds += gap;
+    _windowTimedFrames += r.frames;
+    _windowGpuWait += r.gpuWaitSeconds;
+    if (r.gameCpuSeconds >= 0) {
+        _windowGameCpu += r.gameCpuSeconds;
+        _windowGameFrames += r.frames;
+    }
+    int frames = MAX(r.frames, 1); // a reading with no frames at all is a stall, the slowest kind
+    double frameMs = gap * 1000.0 / frames;
+    if (frameMs <= _slowestFrameMs)
+        return;
+    _slowestFrameMs = frameMs;
+    _slowestGameCpuMs = r.gameCpuSeconds >= 0 ? r.gameCpuSeconds * 1000.0 / frames : -1;
+    _slowestGpuWaitMs = r.gpuWaitSeconds * 1000.0 / frames;
+}
+
+// Where the minute's frames went. Nothing for a minute that drew none.
+- (NSString *)timingText {
+    if (_windowTimedFrames <= 0)
+        return @"";
+    return [NSString stringWithFormat:@"frame %.1f  cpu %@  gpu %.1f  worst %.1f (cpu %@ gpu %.1f)  cores %.1f  ",
+                                      _windowTimedSeconds * 1000.0 / _windowTimedFrames,
+                                      msText(_windowGameFrames > 0 ? _windowGameCpu * 1000.0 / _windowGameFrames : -1),
+                                      _windowGpuWait * 1000.0 / _windowTimedFrames, _slowestFrameMs, msText(_slowestGameCpuMs),
+                                      _slowestGpuWaitMs, _windowAppCpu / _windowSeconds];
+}
+
 // One line for the minute just counted. The thermal column is the hottest the minute got, and the rest is how it
 // ended, so a short spike still shows.
 - (void)closeWindowAt:(NSTimeInterval)now {
-    NSString *line = [NSString stringWithFormat:@"%4.0f min  %-8s  %3.0f fps  limit %-3s  scale %-3s  %@%@%@",
+    NSString *line = [NSString stringWithFormat:@"%4.0f min  %-8s  %3.0f fps  limit %-3s  scale %-3s  %@%@%@%@",
                                                 (now - _startedAt) / 60.0, thermalName(_windowHottest).UTF8String,
                                                 _windowFrames / _windowSeconds,
                                                 _latest.fpsLimit ? @(_latest.fpsLimit).stringValue.UTF8String : "-",
                                                 _latest.scalePercent ? @(_latest.scalePercent).stringValue.UTF8String : "-",
-                                                batteryText(&_latest), _latest.lowPower ? @", low power" : @"",
+                                                [self timingText], batteryText(&_latest), _latest.lowPower ? @", low power" : @"",
                                                 _windowBackground ? @", in background" : @""];
     [_lines addObject:line];
     if (_lines.count > kMaxLines) {
@@ -270,6 +321,9 @@ static NSString *batteryText(const RMHeatReading *r) {
     _windowFrames = 0;
     _windowHottest = _latest.thermalState;
     _windowBackground = NO;
+    _windowTimedSeconds = _windowGameCpu = _windowGpuWait = _windowAppCpu = 0;
+    _windowTimedFrames = _windowGameFrames = 0;
+    _slowestFrameMs = _slowestGameCpuMs = _slowestGpuWaitMs = 0;
 }
 
 - (NSString *)report {
@@ -288,6 +342,10 @@ static NSString *batteryText(const RMHeatReading *r) {
         [out appendFormat:@"%@ | Low Power Mode %@\n", batteryText(&_latest), _latest.lowPower ? @"on" : @"off"];
         [out appendFormat:@"This launch: %.0f min, %.0f min above nominal, %.0f min in the background\n",
                           _playedSeconds / 60.0, _warmSeconds / 60.0, _backgroundSeconds / 60.0];
+        if (_lines.count)
+            [out appendString:@"Times are ms a frame: cpu is the game thread working, gpu is it waiting for the GPU, and "
+                              @"the rest of frame is spare. worst is the minute's slowest few seconds. cores is the whole "
+                              @"app's CPU.\n"];
         if (_dropped)
             [out appendFormat:@"(%lu older minutes dropped)\n", (unsigned long)_dropped];
         for (NSString *line in _lines)

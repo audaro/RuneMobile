@@ -320,10 +320,12 @@ Forced every launch, both ports:
   `DAY_NIGHT_NOTE` comment in `RLHDStarter.java`.
 
 Android additionally forces `tiledLighting=OFF`. Its tiled-lighting shaders are ES-ported in the shader overlay, but
-the feature has never been enabled and validated on Android hardware. iOS seeds it on.
+the feature has never been enabled and validated on Android hardware. iOS seeds it off and players can turn it on.
 
 The seeded defaults (MSAA, resolution scale, draw distance, shadow mode and resolution, normal mapping, dynamic
-lights and so on) differ per port; read them in `RLHDStarter.java` rather than here, since they get retuned.
+lights and so on) differ per port; read them in `RLHDStarter.java` rather than here, since they get retuned. iOS's
+lean to a phone that stays cool, and the `iosGfxSeeded` sentinel means they only reach someone starting 117 HD for
+the first time.
 
 ## Platform limits and the fixes for them
 
@@ -382,10 +384,25 @@ and goes with its switch. The frame limit is `HeatFrameCap`, reached through `Mo
 not use FPS Control's setting, which is saved to the profile and can sync: a session that died hot would leave its
 limit behind. It sleeps on the draw path like FPS Control, so game ticks and audio keep their time.
 
+A new iOS install also starts with a 30 fps cap and a base GPU draw distance of 30. Both are ordinary settings the
+player can change, and a heat limit still applies on top. `applyNewInstallDefaults` in `ViewController.m` sets them
+once FPS Control has loaded. Only a first run raises its flag, which a sentinel in the profile can't promise:
+`RouteCGpuStarter` stops at `isGpu()` before its seed, so an old profile can be missing `mobileVsyncSeeded`. The flag
+comes down once the cap reads back as in force and a save queued after that has landed, because an ok from the bridge
+only means queued and FPS Control turns on later, on the EDT. Before that a kill just means another go on the next launch.
+
 Why the scale stays behind the frame rate: it is a saved setting that changes the picture, and it only exists on one
 renderer. Why 117 HD isn't the iOS default: on a 17 Pro Max in June 2026, base GPU spent 6-8 ms of GPU time a frame
 and 117 HD about 55 ms. Nobody has measured heat on any iPhone for either. Share logs carries a Heat section (a line
-a minute of thermal state, frame rate, limits and battery), so the first real numbers can come from a player's report.
+a minute of thermal state, frame rate, limits, frame timing and battery), so the first real numbers can come from a
+player's report.
+
+GPU timer queries don't exist on ES 3.0, so the timing is split by what the game thread did instead. `frame` is the
+time per frame, `cpu` is that thread on a CPU (`ThreadMXBean`, so it covers GL driver work done on the thread), and
+`gpu` is it blocked in a frame fence, `glFinish` or the present (`RouteCBridge noteGpuWait:`). What's left is spare,
+including any sleep a frame cap adds. `worst` is the minute's slowest reading, because a crowd hardly moves a minute's
+average, and `cores` is the whole app from `getrusage`, for the threads the other columns don't see. Time in the
+background is left out of the frame columns, because it draws nothing and would pass for slow frames.
 
 ## The Android GL bridge lags iOS
 

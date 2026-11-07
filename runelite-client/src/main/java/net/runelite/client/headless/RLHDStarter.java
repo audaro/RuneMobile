@@ -225,20 +225,23 @@ public final class RLHDStarter
 			// USER-TUNABLE graphics defaults — seeded ONCE (first launch, gated on the GFX_SEEDED_KEY sentinel) then
 			// PERSISTED. After the first launch the user owns these via the 117HD plugin config; we no longer force
 			// them, so their edits survive relaunch (RLHD loads the persisted values). All values here are the
-			// iOS-ported set the native panel exposes (each safe to change live): tiledLighting (whole-scene lighting),
-			// dynamicLights=SOME (50 lights), normalMapping (surface relief), shadowMode=DETAILED + transparency (dappled
-			// foliage shadows), antiAliasingMode=MSAA_4 (device max), sceneResolutionScale=100 (native, no SSAA — the fps
-			// pick; raise for sharpness). MAX_LIGHT_COUNT/UBO sizing + the tiled FBO/shader notes are in project memory.
+			// iOS-ported set the native panel exposes (each safe to change live), and they lean to a phone that stays
+			// cool, because anyone who wants more can raise them in the panel: tiledLighting off (with FEW lights its
+			// extra pass buys nothing), shadowMode=FAST with no transparency (the shadow pass is the heaviest GPU cost
+			// after the scene), antiAliasingMode=MSAA_2, sceneResolutionScale=85 and drawDistance=30 (Android's values).
+			// None of this has been measured on an iPhone yet. MAX_LIGHT_COUNT/UBO sizing + the tiled FBO/shader notes
+			// are in project memory.
 			final boolean seed = !"1".equals(MobileUiBridge.getConfig("hd", GFX_SEEDED_KEY));
 			if (seed)
 			{
-				MobileUiBridge.setConfig("hd", "tiledLighting", "ON");
-				MobileUiBridge.setConfig("hd", "dynamicLights", "SOME");
+				MobileUiBridge.setConfig("hd", "tiledLighting", "OFF");
+				MobileUiBridge.setConfig("hd", "dynamicLights", "FEW");
 				MobileUiBridge.setConfig("hd", "normalMapping", "true");
-				MobileUiBridge.setConfig("hd", "shadowMode", "DETAILED");
-				MobileUiBridge.setConfig("hd", "enableShadowTransparency", "true");
-				MobileUiBridge.setConfig("hd", "antiAliasingMode", "MSAA_4");
-				MobileUiBridge.setConfig("hd", "sceneResolutionScale", "100");
+				MobileUiBridge.setConfig("hd", "shadowMode", "FAST");
+				MobileUiBridge.setConfig("hd", "enableShadowTransparency", "false");
+				MobileUiBridge.setConfig("hd", "antiAliasingMode", "MSAA_2");
+				MobileUiBridge.setConfig("hd", "sceneResolutionScale", "85");
+				MobileUiBridge.setConfig("hd", "drawDistance", "30");
 				MobileUiBridge.setConfig("hd", "parallaxOcclusionMappingToggle", "false"); // POM ported + available, off by default (it ADDS GPU cost)
 				MobileUiBridge.setConfig("hd", GFX_SEEDED_KEY, "1");
 				MobileUiBridge.flushConfigQueued();   // persist the seed + sentinel (queued AFTER the writes above)

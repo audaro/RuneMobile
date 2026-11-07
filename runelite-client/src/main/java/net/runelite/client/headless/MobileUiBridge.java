@@ -2059,10 +2059,30 @@ public final class MobileUiBridge
 		{
 			return "";
 		}
-		final int fps = fpsCapFrom(pluginOn(FPS_PLUGIN), cm.getConfiguration(FPS_GROUP, "limitFps"),
-			cm.getConfiguration(FPS_GROUP, "maxFps"));
+		final int fps = fpsCap();
 		final int idle = idleMinutesFrom(pluginOn(IDLE_PLUGIN), cm.getConfiguration(IDLE_GROUP, "idleTimeout"));
 		return new Json().obj().ki("fpsCap", fps).ki("idleLogoutMinutes", idle).end().toString();
+	}
+
+	/** The player's frame-rate cap through FPS Control, 0 for none. */
+	static int fpsCap()
+	{
+		final ConfigManager cm = configManager;
+		if (cm == null)
+		{
+			return 0;
+		}
+		return fpsCapFrom(pluginOn(FPS_PLUGIN), cm.getConfiguration(FPS_GROUP, "limitFps"),
+			cm.getConfiguration(FPS_GROUP, "maxFps"));
+	}
+
+	/**
+	 * Nanoseconds the game thread has spent on a CPU since it started, or -1 if that can't be read yet. Native code
+	 * takes the difference between two readings for the Heat section of Share logs.
+	 */
+	public static long gameThreadCpuNanos()
+	{
+		return DiagnosticsBridge.gameThreadCpuNanos();
 	}
 
 	/** Cap the frame rate through the FPS Control plugin, turning the plugin on if it is off. 0 removes the cap. */
@@ -2148,6 +2168,11 @@ public final class MobileUiBridge
 
 	private static String applyGameSetting(String pluginClass, String[][] writes, boolean needsPlugin)
 	{
+		// Plugins load after the bridge comes up. Writing now would save a setting with nothing to turn on behind it.
+		if (needsPlugin && pluginByClassName(pluginClass) == null)
+		{
+			return "{\"ok\":false,\"reason\":\"no-such-plugin\"}";
+		}
 		for (String[] w : writes)
 		{
 			final String ack = setConfig(w[0], w[1], w[2]);

@@ -37,6 +37,10 @@
 + (BOOL)isPresenting;     // YES once a present layer is set (swapBuffers should present, not read back)
 + (BOOL)hasPresentedFrame;// YES once >=1 frame has been presented — UI switches CPU-blit -> direct present lazily
 + (long)presentedFrameCount; // frames presented since the context came up; the perf readout's direct-present fps
+// Time the game thread has spent stuck waiting for the GPU, in frame fences, glFinish and the present. For the Heat
+// section of Share logs: GPU timer queries don't exist on ES 3.0, so this is the nearest thing to GPU time.
++ (void)noteGpuWait:(double)seconds;
++ (long)gpuWaitNanos;
 + (void)present;          // EAGL: presentRenderbuffer; ANGLE: eglSwapBuffers
 
 // ---- PiP present (EAGL only): the 117HD Picture-in-Picture path ----

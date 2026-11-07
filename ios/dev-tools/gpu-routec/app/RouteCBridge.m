@@ -589,6 +589,16 @@ static volatile BOOL sPresentLayerResized = NO;
     return sPresentedFrames;
 }
 
+static _Atomic long sGpuWaitNanos = 0; // the game thread adds to it, the main thread reads it
+
++ (void)noteGpuWait:(double)seconds {
+    sGpuWaitNanos += (long)(seconds * 1e9);
+}
+
++ (long)gpuWaitNanos {
+    return sGpuWaitNanos;
+}
+
 // ---- readback (offscreen present path; backend-agnostic — glReadPixels is core) ----
 + (void)readbackInto:(uint32_t *)dst width:(int)w height:(int)h
 {

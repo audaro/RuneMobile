@@ -68,12 +68,19 @@ typedef struct {
     BOOL lowPower;
     BOOL background;
     int frames;         // frames drawn since the last reading
+    // All since the last reading, and all CPU or waiting, not time the frames took.
+    double gameCpuSeconds; // the game thread on a CPU, negative when it can't be read
+    double gpuWaitSeconds; // the game thread stuck waiting for the GPU
+    double appCpuSeconds;  // every thread in the app on a CPU
     int batteryState;   // a UIDeviceBatteryState: 0 unknown, 1 on battery, 2 charging, 3 full
     float batteryLevel; // 0 to 1, or negative when the phone doesn't say
     int fpsLimit;       // the limit in force, 0 for none
     int scalePercent;   // 117HD's scale in force, 0 on the other renderers
     int baselineScale;  // what the player set it to, 0 on the other renderers
 } RMHeatReading;
+
+/// CPU used by every thread in the app since launch.
+double RMAppCpuSeconds(void);
 
 /// The session's readings, for the "Heat" section of Share logs: what the phone is doing now, and one line a minute.
 /// Written from the main thread, read from wherever the report is built. Foundation only, as above.

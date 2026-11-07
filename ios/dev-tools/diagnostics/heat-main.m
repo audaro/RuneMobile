@@ -72,6 +72,89 @@ static BOOL has(NSString *text, NSString *part) {
     return [text rangeOfString:part].location != NSNotFound;
 }
 
+static RMHeatReading timedReading(int frames, double gameCpu, double gpuWait, double appCpu) {
+    RMHeatReading r = reading(0, frames);
+    r.gameCpuSeconds = gameCpu;
+    r.gpuWaitSeconds = gpuWait;
+    r.appCpuSeconds = appCpu;
+    return r;
+}
+
+static void checkTiming(void) {
+    check(RMAppCpuSeconds() > 0, @"the app's CPU can be read");
+
+    // A minute of 2 s readings at 25 fps: 40 ms a frame, 20 of them working and 10 waiting, on 1.5 cores.
+    RMHeatLog *log = [RMHeatLog new];
+    [log addReading:timedReading(0, 0, 0, 0) at:0];
+    for (int i = 1; i <= 30; i++)
+        [log addReading:timedReading(50, 1.0, 0.5, 3.0) at:i * 2];
+    NSString *report = [log report];
+    check(has(report, @"frame 40.0  cpu 20.0  gpu 10.0  worst 40.0 (cpu 20.0 gpu 10.0)  cores 1.5"),
+          [NSString stringWithFormat:@"a steady minute:\n%@", report]);
+    check(has(report, @"Times are ms a frame"), @"the report says what the columns are");
+
+    // Most of a minute is smooth and one reading isn't. The average barely moves, so the line has to name it.
+    log = [RMHeatLog new];
+    [log addReading:timedReading(0, 0, 0, 0) at:0];
+    for (int i = 1; i <= 30; i++)
+        [log addReading:(i == 7 ? timedReading(5, 1.8, 0.05, 3.0) : timedReading(50, 1.0, 0.5, 3.0)) at:i * 2];
+    report = [log report];
+    check(has(report, @"worst 400.0 (cpu 360.0 gpu 10.0)"), [NSString stringWithFormat:@"the slowest reading:\n%@", report]);
+
+    // The next minute starts clean, or one bad moment would be reported for the rest of the session.
+    for (int i = 31; i <= 60; i++)
+        [log addReading:timedReading(50, 1.0, 0.5, 3.0) at:i * 2];
+    NSArray<NSString *> *lines = [[log report] componentsSeparatedByString:@"\n"];
+    NSString *second = nil;
+    for (NSString *line in lines)
+        if (has(line, @"   2 min"))
+            second = line;
+    check(second && has(second, @"frame 40.0  cpu 20.0  gpu 10.0  worst 40.0 (cpu 20.0 gpu 10.0)  cores 1.5"),
+          [NSString stringWithFormat:@"a fresh minute: %@", second]);
+
+    // A stall draws nothing at all, which is no reason to skip it.
+    log = [RMHeatLog new];
+    [log addReading:timedReading(0, 0, 0, 0) at:0];
+    for (int i = 1; i <= 30; i++)
+        [log addReading:(i == 3 ? timedReading(0, 0.1, 1.9, 0.2) : timedReading(50, 1.0, 0.5, 3.0)) at:i * 2];
+    report = [log report];
+    check(has(report, @"worst 2000.0 (cpu 100.0 gpu 1900.0)"), [NSString stringWithFormat:@"a stall:\n%@", report]);
+
+    // The game thread can't be read yet: its column says so, and the frames it missed don't water the rest down.
+    log = [RMHeatLog new];
+    [log addReading:timedReading(0, 0, 0, 0) at:0];
+    for (int i = 1; i <= 30; i++)
+        [log addReading:timedReading(50, i <= 15 ? -1 : 1.0, 0.5, 3.0) at:i * 2];
+    report = [log report];
+    check(has(report, @"frame 40.0  cpu 20.0  gpu 10.0"), [NSString stringWithFormat:@"part of a minute read:\n%@", report]);
+    log = [RMHeatLog new];
+    [log addReading:timedReading(0, 0, 0, 0) at:0];
+    for (int i = 1; i <= 30; i++)
+        [log addReading:timedReading(50, -1, 0.5, 3.0) at:i * 2];
+    report = [log report];
+    check(has(report, @"frame 40.0  cpu -  gpu 10.0  worst 40.0 (cpu - gpu 10.0)"),
+          [NSString stringWithFormat:@"none of a minute read:\n%@", report]);
+
+    // A minute in the background draws nothing, and its stalls are the phone's idea, not the game's.
+    log = [RMHeatLog new];
+    RMHeatReading away = timedReading(0, 0.1, 0, 0.2);
+    away.background = YES;
+    [log addReading:away at:0];
+    for (int i = 1; i <= 12; i++)
+        [log addReading:away at:i * 5];
+    report = [log report];
+    check(!has(report, @"  frame ") && has(report, @"in background"), [NSString stringWithFormat:@"a background minute:\n%@", report]);
+
+    // Half a minute away and half playing: the app drew nothing while it was away, and that isn't a stall.
+    log = [RMHeatLog new];
+    [log addReading:away at:0];
+    for (int i = 1; i <= 30; i++)
+        [log addReading:(i <= 15 ? away : timedReading(50, 1.0, 0.5, 3.0)) at:i * 2];
+    report = [log report];
+    check(has(report, @"frame 40.0  cpu 20.0  gpu 10.0  worst 40.0 (cpu 20.0 gpu 10.0)"),
+          [NSString stringWithFormat:@"away isn't slow frames, or a stall:\n%@", report]);
+}
+
 static void checkLog(void) {
     RMHeatLog *log = [RMHeatLog new];
     check(has([log report], @"no readings yet"), @"an empty log says so");
@@ -671,6 +754,7 @@ int main(void) {
     @autoreleasepool {
         checkPolicy();
         checkLog();
+        checkTiming();
         checkThrottling();
         checkMarkerOrder();
         checkCoolingDown();

@@ -275,6 +275,7 @@ static void rc_swap_publish(JNIEnv *env)
     double g0 = rc_now_seconds();
     glFinish();                              // block until the GPU has finished rendering THIS frame
     tGpu = rc_now_seconds() - g0;        // = GPU render time/frame
+    [RouteCBridge noteGpuWait:tGpu];
     void *dst = (*env)->GetPrimitiveArrayCritical(env, arr, NULL);
     if (dst) {
         double r0 = rc_now_seconds();
@@ -1020,6 +1021,7 @@ static JNIEXPORT void JNICALL rc_AWT_swapBuffers_0(JNIEnv *env, jobject self)
         double p0 = rc_now_seconds();
         [RouteCBridge present];
         double tPresent = rc_now_seconds() - p0;
+        [RouteCBridge noteGpuWait:tPresent];
         if (rc_pp_armed < 0) {
             rc_pp_armed = rc_fpsprobe_armed(env);
             fprintf(stderr, "[presentprobe] %s (-Drunelite.fpsprobe)\n", rc_pp_armed ? "armed" : "off");

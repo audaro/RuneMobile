@@ -683,7 +683,9 @@ or touch.** iOS.
 - **Symptom:** the same build measures several times slower than it did earlier.
 - **Cause:** phones throttle when hot or charging. On 117 HD both ports also lower the scene resolution scale
   under thermal pressure, on purpose, and iOS limits the frame rate on every renderer when the phone is warm or in
-  Low Power Mode, so a 30 or 40 fps reading may be the app's own limit. The Heat section of Share logs says.
+  Low Power Mode, so a 30 or 40 fps reading may be the app's own limit. A new iPhone install also starts with a
+  30 fps cap. The Heat section and the Frame-rate cap line of Share logs say which it is, and the Heat section's
+  frame timing says whether the frames were held up by the game thread or the GPU.
 - **What to do:** check the thermal state before calling a regression (on Android,
   `adb shell dumpsys thermalservice`). `fps-measure.sh` records thermal lines alongside the frame data; the
   harness server's `android_fps` flags a capture where the governor moved the scale mid-run.

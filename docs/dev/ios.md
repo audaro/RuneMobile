@@ -445,7 +445,8 @@ keyboard up for chat. A plugin panel's text field takes priority, so the game's 
 ### Settings, pinned controls and the control editor
 
 The ⚙ gear is always on screen. **Game settings** (`RMGameSettings`) holds the long-press time, camera speed,
-idle-logout time, frame-rate cap and haptics; the game-dependent rows appear once the game has loaded. Changes
+idle-logout time, frame-rate cap (30 fps on a new install) and haptics; the game-dependent rows appear once the game
+has loaded. Changes
 post `RMGameSettingsDidChangeNotification`. Long-pressing the gear sets the **Interface size**, the canvas height
 from 480 to 600 (default 540): a smaller canvas makes the HUD larger. It applies at the next launch.
 

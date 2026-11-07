@@ -89,6 +89,11 @@ public final class DiagnosticsBridge
 	 */
 	private static volatile Thread gameThread;
 	static final String GAME_THREAD_NAME = "Client";
+	/**
+	 * For {@link #gameThreadCpuNanos()}, which the app's main thread reads. Fetched on the watchdog thread alongside
+	 * {@link #gameThread}, because the first fetch loads a lot of classes and the main thread can't spare the wait.
+	 */
+	private static volatile ThreadMXBean threadBean;
 	/** Polls spent looking for the game thread; the search stops after {@link #MAX_GAME_THREAD_SEARCHES}. */
 	private static int gameThreadSearches; // watchdog thread only
 	private static final int MAX_GAME_THREAD_SEARCHES = 30;
@@ -156,6 +161,8 @@ public final class DiagnosticsBridge
 		sb.append(" | heap ").append((rt.totalMemory() - rt.freeMemory()) >> 20).append('/')
 			.append(rt.maxMemory() >> 20).append(" MB\n");
 		sb.append("Audio: ").append(HeadlessAudio.report()).append('\n');
+		final int fpsCap = MobileUiBridge.fpsCap();
+		sb.append("Frame-rate cap: ").append(fpsCap > 0 ? fpsCap + " fps" : "none").append('\n');
 
 		final long changedNs = lastCycleChangeNs;
 		if (c != null && changedNs != 0)
@@ -349,6 +356,37 @@ public final class DiagnosticsBridge
 		}
 	}
 
+	/** See {@link MobileUiBridge#gameThreadCpuNanos()}. */
+	static long gameThreadCpuNanos()
+	{
+		final Thread t = gameThread;
+		final ThreadMXBean bean = threadBean;
+		if (t == null || bean == null)
+		{
+			return -1;
+		}
+		try
+		{
+			return bean.getThreadCpuTime(t.getId());
+		}
+		catch (Throwable e)
+		{
+			return -1;
+		}
+	}
+
+	private static ThreadMXBean fetchThreadBean()
+	{
+		try
+		{
+			return ManagementFactory.getThreadMXBean();
+		}
+		catch (Throwable e)
+		{
+			return null; // the management module can be missing from the runtime, as in threadDump
+		}
+	}
+
 	private static boolean gameThreadExited()
 	{
 		final Thread t = gameThread;
@@ -417,6 +455,7 @@ public final class DiagnosticsBridge
 					if (gameThread == null && gameThreadSearches < MAX_GAME_THREAD_SEARCHES)
 					{
 						gameThreadSearches++;
+						threadBean = threadBean != null ? threadBean : fetchThreadBean();
 						gameThread = findThread(GAME_THREAD_NAME);
 					}
 					continue;

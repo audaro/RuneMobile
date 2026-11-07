@@ -21,7 +21,7 @@ rewrite lives in native code, so neither step happens in a desktop build. The ma
 
 1. **`RlhdShaderDump.java`** assembles every program the zone renderer builds (scene, water, gap filler, the shadow
    passes, tiled lighting, UI, sky, stars, the nebula bake and the debug overlays) through 117 HD's own
-   `HdPlugin.getShaderIncludes()`, once per settings variant. The 11 variants in `run-matrix.sh` between them give
+   `HdPlugin.getShaderIncludes()`, once per settings variant. The 12 variants in `run-matrix.sh` between them give
    each settings-driven `#define` every value it can take.
 2. **`downport_check.py`** applies the port's run-time rewrite and validates each stage with `glslangValidator`:
    - **ios:** `RouteCBridge.m`'s `downportShaderSource`, for Apple's OpenGL ES 3.0 driver. It also scans the live

@@ -59,6 +59,7 @@ VARIANTS=(
 	"ditherhigh|shadowFiltering=DITHERED_HIGH shadowMode=FAST"
 	"pixelated|shadowFiltering=PIXELATED centroidQualifier=OFF pointSprites=ON"
 	"misc|wireframe=true windowsHdrCorrection=true legacyBoatSilhouettes=true normalMapping=false waterSpecularReflections=false enableNebulae=false"
+	"iosdefaults|tiledLighting=OFF dynamicLights=FEW shadowMode=FAST shadowTransparency=false shadowFiltering=SMOOTH_HIGH parallaxOcclusionMapping=false windDisplacement=false characterDisplacement=false daylightCycle=OFF"
 	"pomonly|parallaxOcclusionMapping=true normalMapping=false windDisplacement=false characterDisplacement=true shadowMode=FAST daylightCycle=OFF"
 )
 

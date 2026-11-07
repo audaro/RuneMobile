@@ -21,11 +21,15 @@ as "What's new".
   On iPhone the game also plays with the Ring/Silent switch on silent, so use Game sound to quiet it.
 - **iPhone: the game eases off when the phone gets hot.** It lowers the frame rate as the phone warms up, on every
   renderer, and goes back up once it has cooled. Low Power Mode holds it to 30 fps.
-- **iPhone: Share logs shows heat and battery readings,** a line a minute, to help with reports of a hot phone.
+- **iPhone: Share logs shows heat, battery and frame timing readings,** a line a minute, to help with reports of a hot
+  phone.
 
 ### Changed
 - **iPhone: new installs start on GPU instead of 117 HD.** It runs much lighter on the phone, and 117 HD is still in
   the plugins panel. If you're already set up, nothing changes, and you can switch by hand.
+- **iPhone: new installs start on lighter settings.** The frame rate is capped at 30 fps, with a shorter draw distance,
+  and 117 HD starts with simpler shadows and lighting at a lower resolution. You can raise any of it in Game settings
+  or the plugins panel. If you're already set up, your settings stay as they are.
 
 ### Fixed
 - **Android: 117 HD no longer stays blurry after the app is closed on a hot phone.** The lowered resolution could

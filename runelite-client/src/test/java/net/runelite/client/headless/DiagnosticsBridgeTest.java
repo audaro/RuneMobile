@@ -45,6 +45,7 @@ public class DiagnosticsBridgeTest
 		final String text = o.get("text").getAsString();
 		assertTrue(text, text.startsWith("RuneLite "));
 		assertTrue(text, text.contains("Plugins: (not loaded yet)"));
+		assertTrue(text, text.contains("Frame-rate cap: none"));
 		assertTrue(text, text.contains("Threads ("));
 		assertTrue(text, text.contains('"' + Thread.currentThread().getName() + '"'));
 	}

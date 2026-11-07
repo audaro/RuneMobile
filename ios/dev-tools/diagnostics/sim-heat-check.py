@@ -6,12 +6,16 @@ renderer this boots to the login screen and checks that:
   - a cool phone is left alone, and the game runs faster than every limit below (or the limits would prove nothing)
   - Low Power Mode holds it to 30 fps, and turning it off lifts that at once
   - a critical phone holds it to 20 fps, and the report shows the state, the limit and the frame rate
+  - the report's minute lines say where the frames went
 On the first renderer it also checks the limit comes off a step after a minute of calm. On 117HD it moves the
 resolution setting as a player would, before and during a throttle, and checks the player's value is the one that
 comes back, then kills the app mid-throttle with that throttle saved and checks the next launch puts the player's
 value on disk before it drops the marker. It does that again with a player's move during a steady throttle: the limit
-has to hold, and the move has to reach the marker before the kill. Then, last, it boots with no saved renderer, as a
-new install does, and checks the app picks base GPU.
+has to hold, and the move has to reach the marker before the kill. Then, last, it boots as a new install does, with no
+saved renderer and 117HD's seed sentinel taken out of the profile. The app has to pick base GPU, a 30 fps cap and base
+GPU's shorter draw distance, with both surviving a kill as soon as it says they're saved. A cap taken off and a distance
+moved have to stay as the player left them, and 117HD has to start on its light settings and boot for real on them. The
+profile and the app's defaults are put back afterwards.
 
 What the simulator can't say: how hot any of this runs, or anything in the world. There the GPU modes draw with
 Apple's software renderer at about 3 fps, under every limit, and 117HD sits in its shader compile, so this stays at
@@ -36,6 +40,16 @@ import screendriver as sd  # noqa: E402
 from screendriver import hs  # noqa: E402
 
 LIMIT_WAIT = 30  # seconds for a new limit to show in the report: a heat tick is 120 display ticks
+# What a new install's renderers start on, as the saved profile spells it. Base GPU's comes from the app's first-run
+# flag and 117HD's from its seed, whose sentinel is what says it has been run before.
+NEW_GPU = {"gpu.drawDistance": "30"}
+NEW_HD = {"hd.tiledLighting": "OFF", "hd.dynamicLights": "FEW", "hd.shadowMode": "FAST",
+          "hd.enableShadowTransparency": "false", "hd.antiAliasingMode": "MSAA_2", "hd.sceneResolutionScale": "85",
+          "hd.drawDistance": "30"}
+HD_SEEDED = "hd.iosGfxSeeded"
+MOVED_GPU = {"gpu.drawDistance": "40"}  # a player's own value, which no launch after the first may touch
+# The app's defaults a first run reads or writes, and how to write each back.
+APP_DEFAULTS = {"rendererPref": "-string", "autoGpuFailed": "-bool", "newInstallDefaults": "-bool"}
 SETTLE = 9       # then long enough that the report's frame rate was measured wholly under it
 SLACK = 1.15     # the report's frame rate is measured over one tick, so it may read a little high
 
@@ -122,6 +136,7 @@ def check_renderer(drv, udid, renderer, lift):
     if fps is None or fps <= 30:
         run.problems.append(f"cool: the game runs at {fps} fps, so the limits below can't show: {run.now(text)}")
 
+    check_timing(run, renderer, False)  # check_first_run starts 117HD for real: this launch waits for the world
     if renderer == "117hd":
         check_players_scale(run)
 
@@ -249,22 +264,181 @@ def check_moved_during_steady_throttle(drv, udid):
     return problems
 
 
+def profile_files(drv):
+    return list((drv.docs / ".runelite/profiles2").glob("*.properties"))
+
+
+def saved_settings(drv, keys):
+    """The keys' values in the saved profile, as far as it sets them."""
+    found = {}
+    for f in profile_files(drv):
+        for key, value in re.findall(r"^([\w.]+)=(.*)$", f.read_text(errors="replace"), re.M):
+            if key in keys:
+                found[key] = value
+    return found
+
+
+def forget_settings(drv, keys):
+    """Takes the keys out of the saved profile, to leave one that has never run a renderer."""
+    pattern = re.compile(r"^(?:" + "|".join(re.escape(k) for k in keys) + r")=.*\n", re.M)
+    for f in profile_files(drv):
+        f.write_text(pattern.sub("", f.read_text(errors="replace")))
+
+
+def app_default(udid, prefs, key):
+    """The app's default as `defaults` prints it, None if it isn't set."""
+    read = subprocess.run(["xcrun", "simctl", "spawn", udid, "defaults", "read", str(prefs), key],
+                          capture_output=True, text=True)
+    return read.stdout.strip() if read.returncode == 0 else None
+
+
+def set_app_default(udid, prefs, key, value):
+    spawn = ["xcrun", "simctl", "spawn", udid, "defaults"]
+    if value is None:
+        subprocess.run(spawn + ["delete", str(prefs), key], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        subprocess.run(spawn + ["write", str(prefs), key, APP_DEFAULTS[key], value], check=True)
+
+
+def wait_for_line(drv, text, since, seconds):
+    """True once this launch's shell log has the text."""
+    end = time.time() + seconds
+    while time.time() < end:
+        if drv.shell_log.stat().st_birthtime >= since - 1 and \
+                text in drv.shell_log.read_text(encoding="utf-8", errors="replace"):
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def settle_settings(drv, want):
+    """Saves until the profile holds what's wanted: a seed queues on the client thread, and a save doesn't wait for it."""
+    end = time.time() + LIMIT_WAIT
+    while True:
+        ok, why, _seq = drv.open("config-flush")
+        if not ok:
+            raise sd.DriverError(f"config-flush failed: {why}")
+        time.sleep(3)
+        found = saved_settings(drv, want)
+        if found == want or time.time() > end:
+            return found
+
+
+def frame_cap(drv):
+    """What Share logs says the frame-rate cap is."""
+    ok, why, _seq = drv.open("report")
+    if not ok:
+        raise sd.DriverError(f"report command failed: {why}")
+    report = (drv.docs / "screen-report.txt").read_text(encoding="utf-8")
+    m = re.search(r"^Frame-rate cap: (.+)$", report, re.M)
+    return m.group(1) if m else None
+
+
+def wait_for_frame_cap(drv, want, seconds):
+    end = time.time() + seconds
+    while True:
+        cap = frame_cap(drv)
+        if cap == want or time.time() > end:
+            return cap
+        time.sleep(2)
+
+
+def check_timing(run, renderer, waits_for_gpu):
+    """The minute lines have to say where the frames went. Only 117HD's frame fences show a GPU wait here: on base GPU's
+    login frame the simulator's glFinish returns at once, as the app's own [perf] line says (gpuFinish=0.00 ms)."""
+    end = time.time() + 75  # the first line closes a minute after the first reading
+    while time.time() < end:
+        m = re.search(r"frame ([\d.]+)  cpu ([\d.]+|-)  gpu ([\d.]+)  worst ([\d.]+) \(cpu ([\d.]+|-) gpu ([\d.]+)\)"
+                      r"  cores ([\d.]+)", run.section())
+        if m:
+            print(f"  timing: {m.group(0)}", flush=True)
+            frame, cpu, gpu, cores = float(m.group(1)), m.group(2), float(m.group(3)), float(m.group(7))
+            if cpu == "-" or float(cpu) <= 0 or float(cpu) > frame * 2:
+                run.problems.append(f"{renderer}: the game thread's CPU reads {cpu} of a {frame} ms frame")
+            if cores <= 0:
+                run.problems.append(f"{renderer}: the app's CPU reads {cores} cores")
+            if waits_for_gpu and gpu <= 0:
+                run.problems.append(f"{renderer}: no time waiting for the GPU")
+            return
+        time.sleep(3)
+    run.problems.append(f"{renderer}: no timing in the report after a minute: {run.section()[-300:]}")
+
+
 def check_first_run(drv, udid):
+    """A new install: the renderer it picks, the cap it gets, and what each renderer starts on. The profile is put back."""
     print("new install:", flush=True)
+    args = ["-RMAutoPlay", "YES", "-RMScreenDriver", "YES", "-RMSkipLogin", "YES"]
     subprocess.run(["xcrun", "simctl", "terminate", udid, hs.IOS_BUNDLE_ID], stderr=subprocess.DEVNULL)
+    saved = {f: f.read_bytes() for f in profile_files(drv)}
+    forget_settings(drv, [HD_SEEDED] + list(NEW_GPU) + list(NEW_HD))
     # By path: the app's defaults are in its own container, and the bundle id would name the simulator's global ones.
     prefs = drv.docs.parent / "Library/Preferences" / hs.IOS_BUNDLE_ID
+    before = {key: app_default(udid, prefs, key) for key in APP_DEFAULTS}
     for key in ("rendererPref", "autoGpuFailed"):
-        subprocess.run(["xcrun", "simctl", "spawn", udid, "defaults", "delete", str(prefs), key],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    launched = launch(drv, udid, ["-RMAutoPlay", "YES", "-RMScreenDriver", "YES", "-RMSkipLogin", "YES"],
-                      "LOGIN_SCREEN")
-    picked = re.findall(r"first-run caps probe -> default renderer (\S+)",
-                        drv.shell_log.read_text(encoding="utf-8", errors="replace"))
-    print(f"  picked {picked[-1] if picked else 'nothing'}", flush=True)
-    if not picked or picked[-1] != "gpu" or drv.shell_log.stat().st_mtime < launched:
-        return [f"a new install picked {picked[-1] if picked else 'nothing'}, wanted gpu"]
-    return []
+        set_app_default(udid, prefs, key, None)
+    problems = []
+    try:
+        launched = launch(drv, udid, args, "LOGIN_SCREEN")
+        picked = re.findall(r"first-run caps probe -> default renderer (\S+)",
+                            drv.shell_log.read_text(encoding="utf-8", errors="replace"))
+        print(f"  picked {picked[-1] if picked else 'nothing'}", flush=True)
+        if not picked or picked[-1] != "gpu" or drv.shell_log.stat().st_mtime < launched:
+            problems.append(f"a new install picked {picked[-1] if picked else 'nothing'}, wanted gpu")
+
+        # The app says they're saved, and is killed with nothing else to save them: they have to be there already.
+        saved_line = wait_for_line(drv, "[shell] new install:", launched, 90)
+        subprocess.run(["xcrun", "simctl", "terminate", udid, hs.IOS_BUNDLE_ID], stderr=subprocess.DEVNULL)
+        gpu = saved_settings(drv, NEW_GPU)
+        launch(drv, udid, args, "LOGIN_SCREEN")
+        cap = wait_for_frame_cap(drv, "30 fps", LIMIT_WAIT)
+        print(f"  killed once saved: {saved_line}; base GPU {gpu}, frame-rate cap {cap}", flush=True)
+        if not saved_line:
+            problems.append("the app never said a new install's settings were saved")
+        if cap != "30 fps":
+            problems.append(f"a new install's cap is {cap}, wanted 30 fps")
+        if gpu != NEW_GPU:
+            problems.append(f"base GPU started on {gpu}, wanted {NEW_GPU}")
+
+        # Both are the player's from here, so only a first run may set them.
+        ok, why, _seq = drv.open("fps-cap 0")
+        if not ok:
+            raise sd.DriverError(f"fps-cap failed: {why}")
+        cap = wait_for_frame_cap(drv, "none", LIMIT_WAIT)
+        settle_settings(drv, NEW_GPU)  # saves the cap coming off
+        subprocess.run(["xcrun", "simctl", "terminate", udid, hs.IOS_BUNDLE_ID], stderr=subprocess.DEVNULL)
+        forget_settings(drv, list(MOVED_GPU))
+        for f in profile_files(drv):
+            if "default-" in f.name:
+                f.write_text(f.read_text(errors="replace") + "".join(f"{k}={v}\n" for k, v in MOVED_GPU.items()))
+        launch(drv, udid, args, "LOGIN_SCREEN")
+        time.sleep(SETTLE)
+        after = frame_cap(drv)
+        moved = settle_settings(drv, MOVED_GPU)
+        print(f"  cap taken off: {cap}, and the next launch: {after}, with {moved}", flush=True)
+        if cap != "none" or after != "none":
+            problems.append(f"the cap came back: {cap} after taking it off, {after} on the next launch")
+        if moved != MOVED_GPU:
+            problems.append(f"the next launch moved the player's draw distance: {moved}, wanted {MOVED_GPU}")
+
+        # Booted for real on these settings, on the login screen: a seed that didn't compile stops the plugin there.
+        since = launch(drv, udid, ["-rendererPref", "117hd", "-RM117HDAtLogin", "YES"] + args, "LOGIN_SCREEN")
+        first = wait_for_line(drv, "117HD first GL present", since, 180)
+        hd = settle_settings(drv, NEW_HD)
+        print(f"  117HD: first present {first}, {hd}", flush=True)
+        if not first:
+            problems.append("117HD didn't get to a first present on a new install's settings")
+        if hd != NEW_HD:
+            problems.append(f"117HD started on {hd}, wanted {NEW_HD}")
+        run = Run(drv)
+        check_timing(run, "117hd", True)
+        problems += run.problems
+    finally:
+        subprocess.run(["xcrun", "simctl", "terminate", udid, hs.IOS_BUNDLE_ID], stderr=subprocess.DEVNULL)
+        for f, data in saved.items():
+            f.write_bytes(data)
+        for key, value in before.items():
+            set_app_default(udid, prefs, key, value)
+    return problems
 
 
 def main():

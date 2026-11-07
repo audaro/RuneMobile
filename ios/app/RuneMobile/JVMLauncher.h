@@ -518,6 +518,9 @@ typedef NS_ENUM(NSInteger, RMJitScriptCheck) {
 /// Holds the game to `fps` while the phone is hot, on top of any cap the player set; 0 lifts it (MobileUiBridge
 /// setHeatFpsCap). In memory only, so it saves nothing to the player's profile. NO until the bridge is up: try again.
 + (BOOL)setHeatFpsCap:(int)fps;
+/// Nanoseconds the game thread has spent on a CPU since it started (MobileUiBridge gameThreadCpuNanos), or -1 if that
+/// can't be read yet. On the main thread, like the other bridge reads.
++ (long long)gameThreadCpuNanos;
 /// Set the idle logout time through the Logout Timer plugin, in minutes. Ack JSON, nil if unavailable.
 + (nullable NSString *)setIdleLogoutMinutes:(int)minutes;
 

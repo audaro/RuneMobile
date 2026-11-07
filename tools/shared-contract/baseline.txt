@@ -232,6 +232,7 @@ METHOD MobileUiBridge#fireHotkey(String,String) -> void
 METHOD MobileUiBridge#flushConfig() -> String
 METHOD MobileUiBridge#flushConfigQueued() -> String
 METHOD MobileUiBridge#gameSettings() -> String
+METHOD MobileUiBridge#gameThreadCpuNanos() -> long
 METHOD MobileUiBridge#geAvailable() -> boolean
 METHOD MobileUiBridge#geJson() -> String
 METHOD MobileUiBridge#geSearch(String) -> String

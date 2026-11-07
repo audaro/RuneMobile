@@ -23,7 +23,8 @@
 #                        it was asked for (not the crash cookie's CPU fallback) and is still running 15 s later
 #                        (117hd also checks a player's launch: 117HD off, the login screen's picture still moving)
 #      heat              diagnostics/sim-heat-check.py: the frame rate falls under Low Power Mode and at critical on
-#                        each renderer, the limit comes off after a calm minute, and a new install picks base GPU
+#                        each renderer, the limit comes off after a calm minute, the report has frame timing, and a
+#                        new install picks base GPU and starts on its 30 fps cap and light settings
 #   6. log scan          tools/log-scan/log-scan.py over every launch's jvm-stdio.log and hello-shell.log: no line
 #                        that isn't on the known-noise list, and no shader error at all (the list can't excuse one)
 # Every launch is logged out (-RMSkipLogin), so the gate never logs into the game, whatever session the simulator
