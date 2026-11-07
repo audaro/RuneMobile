@@ -669,7 +669,8 @@ static NSString *RMPasteLine(NSString *s) {
 @property (nonatomic, assign) long heatPresentedFrames; // the direct present's, likewise
 @property (nonatomic, assign) int thermalBaselineScale; // <=0 (the ivar default) = not captured yet
 @property (nonatomic, assign) int thermalAppliedScale;  // last scale this governor wrote (valid once captured)
-@property (nonatomic, assign) long long thermalWriteId; // the bridge's id for that write, to know when it has landed
+@property (nonatomic, assign) BOOL thermalMarkerRetiring;     // the marker can go once the config is on disk
+@property (nonatomic, assign) long long thermalMarkerFlushId; // the flush that puts it there, 0 until one is queued
 @property (nonatomic, strong) UIView *pluginPanel;
 @property (nonatomic, strong) UITableView *pluginTable;
 @property (nonatomic, strong) NSArray<NSDictionary *> *pluginList;  // the FILTERED view the table renders
@@ -5966,16 +5967,38 @@ static int simHeatLowPower = -1;
     [RMHeatLog.shared addReading:reading at:now];
 }
 
-// Queues sceneResolutionScale and notes the write's id. NO if the bridge didn't take it.
+// Queues sceneResolutionScale. NO if the bridge didn't take it.
 - (BOOL)heatWriteScale:(int)scale {
     NSString *ack = [JVMLauncher mobileSetConfigGroup:@"hd"
                                                   key:@"sceneResolutionScale"
                                                 value:[NSString stringWithFormat:@"%d", scale]];
-    NSDictionary *d = ack.length ? parseBridgeJSON(ack, "ViewController.heatWriteScale") : nil;
-    if (![d isKindOfClass:[NSDictionary class]] || ![d[@"ok"] boolValue])
-        return NO;
-    self.thermalWriteId = [d[@"writeId"] longLongValue];
-    return YES;
+    return [ack hasPrefix:@"{\"ok\":true"];
+}
+
+// The marker brings the player's value back if the app dies with a throttled one in the config, so it stays until
+// their value is on disk. A write that has landed is only in memory: iOS runs no periodic save, so this queues a
+// flush behind the writes and heatSettleMarker removes the marker once that has run.
+- (void)heatRetireMarker {
+    if ([[NSUserDefaults standardUserDefaults] objectForKey:@"thermalBaselineScale"])
+        self.thermalMarkerRetiring = YES;
+}
+
+- (void)heatKeepMarker:(int)baseline {
+    [[NSUserDefaults standardUserDefaults] setInteger:baseline forKey:@"thermalBaselineScale"];
+    self.thermalMarkerRetiring = NO;
+    self.thermalMarkerFlushId = 0;
+}
+
+- (void)heatSettleMarker {
+    if (!self.thermalMarkerRetiring)
+        return;
+    if (self.thermalMarkerFlushId == 0) {
+        self.thermalMarkerFlushId = [JVMLauncher mobileFlushConfig]; // 0 if it can't queue yet: next tick
+    } else if ([JVMLauncher mobileProcessedWriteId] >= self.thermalMarkerFlushId) {
+        [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"thermalBaselineScale"];
+        self.thermalMarkerRetiring = NO;
+        self.thermalMarkerFlushId = 0;
+    }
 }
 
 // 117HD's half of a heat limit: holds sceneResolutionScale to `limitPercent` (0 for no limit) and never above the
@@ -5992,7 +6015,7 @@ static int simHeatLowPower = -1;
                 return; // bridge not up yet — retry next tick, keep the marker
             self.thermalBaselineScale = leaked;
             self.thermalAppliedScale = leaked;
-            [ud removeObjectForKey:@"thermalBaselineScale"];
+            [self heatRetireMarker];
             [self appendLine:[NSString stringWithFormat:
                                            @"[shell] thermal: recovered a leaked throttle -> restored sceneResolutionScale=%d", leaked]];
         } else {
@@ -6005,29 +6028,34 @@ static int simHeatLowPower = -1;
                                            @"[shell] thermal governor armed (117HD) — baseline sceneResolutionScale=%d", live]];
         }
     }
+    [self heatSettleMarker];
     // Never above the baseline, so a low-res user config is honoured.
     int baseline = self.thermalBaselineScale;
     int target = limitPercent > 0 ? MIN(baseline, limitPercent) : baseline;
     if (target == self.thermalAppliedScale)
         return;
+    // Bridge writes queue on the client thread, which can stall for minutes in a scene load or a shader compile. While
+    // any wait the live value isn't what it will be, and a write now would land on top of a player's. So wait: adopting
+    // a stale value could make a throttle permanent, and no timer can stand in for this.
+    if (![JVMLauncher mobileConfigWritesLanded])
+        return;
     // About to write, so first see if the player has moved the setting since the last write: theirs is the new
-    // baseline, or cooling down would put the old value back. Bridge writes queue on the client thread, so until the
-    // last one has landed a different value is only that write still waiting, and adopting it could make a throttle
-    // permanent. The thread can stall for minutes in a scene load or a shader compile, so a timer can't stand in.
-    if ([JVMLauncher mobileProcessedWriteId] >= self.thermalWriteId) {
-        int live = [self thermalReadLiveScale];
-        if (live <= 0)
-            return; // config not readable: retry next tick
-        if (live != self.thermalAppliedScale) {
-            [self appendLine:[NSString stringWithFormat:@"[shell] thermal: player set sceneResolutionScale=%d (was %d)",
-                                                        live, self.thermalAppliedScale]];
-            baseline = live;
-            self.thermalBaselineScale = live;
-            self.thermalAppliedScale = live;
-            [ud removeObjectForKey:@"thermalBaselineScale"];
-            target = limitPercent > 0 ? MIN(live, limitPercent) : live;
-            if (target == live)
-                return;
+    // baseline, or cooling down would put the old value back.
+    int live = [self thermalReadLiveScale];
+    if (live <= 0)
+        return; // config not readable: retry next tick
+    if (live != self.thermalAppliedScale) {
+        [self appendLine:[NSString stringWithFormat:@"[shell] thermal: player set sceneResolutionScale=%d (was %d)", live,
+                                                    self.thermalAppliedScale]];
+        baseline = live;
+        self.thermalBaselineScale = live;
+        self.thermalAppliedScale = live;
+        if ([ud objectForKey:@"thermalBaselineScale"])
+            [ud setInteger:live forKey:@"thermalBaselineScale"];
+        target = limitPercent > 0 ? MIN(live, limitPercent) : live;
+        if (target == live) {
+            [self heatRetireMarker];
+            return;
         }
     }
     if (![self heatWriteScale:target])
@@ -6035,9 +6063,9 @@ static int simHeatLowPower = -1;
     int prev = self.thermalAppliedScale;
     self.thermalAppliedScale = target;
     if (target < baseline)
-        [ud setInteger:baseline forKey:@"thermalBaselineScale"];
+        [self heatKeepMarker:baseline];
     else
-        [ud removeObjectForKey:@"thermalBaselineScale"];
+        [self heatRetireMarker];
     [self appendLine:[NSString stringWithFormat:
                                    @"[shell] thermal state=%ld -> sceneResolutionScale %d->%d (baseline=%d)", (long)thermal, prev, target, baseline]];
 }
@@ -10037,6 +10065,7 @@ static CGRect mapRectFromArr(NSArray *a) {
 //              ios/dev-tools/diagnostics/sim-report-check.py and sim-heat-check.py.
 //   heat       stands in for the phone's thermal state and Low Power Mode, for sim-heat-check.py.
 //   hd-scale   moves 117HD's resolution setting the way its slider does, likewise.
+//   config-flush saves the config now, likewise.
 
 static NSString *simScreenSeq;    // the last command's seq
 static NSString *simScreenOpened; // "<seq> <screen>" opened and not yet reported ready
@@ -10123,6 +10152,12 @@ static const CFTimeInterval kSimConfirmTimeout = 15.0;
         NSArray<NSString *> *parts = [name componentsSeparatedByString:@" "];
         simHeatThermal = parts[1].intValue;
         simHeatLowPower = parts.count > 2 ? parts[2].intValue : -1;
+        [self appendLine:[NSString stringWithFormat:@"[screen] ready %@ %@", seq, name]];
+        return;
+    }
+    // "config-flush": save the config, as the app does on its way to the background.
+    if ([name isEqualToString:@"config-flush"]) {
+        [JVMLauncher mobileFlushConfig];
         [self appendLine:[NSString stringWithFormat:@"[screen] ready %@ %@", seq, name]];
         return;
     }

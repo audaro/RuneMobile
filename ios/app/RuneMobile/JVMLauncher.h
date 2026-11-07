@@ -575,6 +575,9 @@ typedef NS_ENUM(NSInteger, RMJitScriptCheck) {
 
 /// Highest processed write id (MobileUiBridge.getProcessedWriteId) — the fire-and-forget write ack.
 + (long long)mobileProcessedWriteId;
+/// YES once every config write this shell has queued has reached the client thread and run, so the live config says
+/// what it's going to. Main thread.
++ (BOOL)mobileConfigWritesLanded;
 
 /// Flush pending config to disk (MobileUiBridge.flushConfigQueued, behind the writes already queued). iOS closes
 /// the app without running RuneLite's shutdown/periodic flush, so the shell calls this on config/panel close + app

@@ -3897,6 +3897,20 @@ static BOOL pipFeedMarkerSaysMain(void) {
     return out;
 }
 
+// The newest config write this shell queued (main thread, like the calls that make them).
+static long long gLastConfigWriteId = 0;
+
+static NSString *noteConfigWrite(NSString *ack) {
+    NSRange at = [ack rangeOfString:@"\"writeId\":"];
+    if (at.location != NSNotFound)
+        gLastConfigWriteId = [ack substringFromIndex:NSMaxRange(at)].longLongValue;
+    return ack;
+}
+
++ (BOOL)mobileConfigWritesLanded {
+    return [self mobileProcessedWriteId] >= gLastConfigWriteId;
+}
+
 + (NSString *)mobileSetConfigGroup:(NSString *)group key:(NSString *)key value:(NSString *)value {
     if (!ensureMui() || group == nil || key == nil || value == nil)
         return nil;
@@ -3906,7 +3920,7 @@ static BOOL pipFeedMarkerSaysMain(void) {
     jstring jv = (*env)->NewStringUTF(env, value.UTF8String);
     NSString *out = jstringToNS(env, (jstring)(*env)->CallStaticObjectMethod(env, gMuiClass, gMuiSetCfg, jg, jk, jv));
     (*env)->DeleteLocalRef(env, jg); (*env)->DeleteLocalRef(env, jk); (*env)->DeleteLocalRef(env, jv);
-    return out;
+    return noteConfigWrite(out);
 }
 
 + (NSString *)mobileResetConfigGroup:(NSString *)group key:(NSString *)key {
@@ -3917,7 +3931,7 @@ static BOOL pipFeedMarkerSaysMain(void) {
     jstring jk = (*env)->NewStringUTF(env, key.UTF8String);
     NSString *out = jstringToNS(env, (jstring)(*env)->CallStaticObjectMethod(env, gMuiClass, gMuiResetCfg, jg, jk));
     (*env)->DeleteLocalRef(env, jg); (*env)->DeleteLocalRef(env, jk);
-    return out;
+    return noteConfigWrite(out);
 }
 
 // Whole-plugin reset (CFG-10): reapply group defaults + plugin.resetConfiguration().

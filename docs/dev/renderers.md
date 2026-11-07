@@ -347,9 +347,10 @@ run the shader matrix.
 `ViewController.m` on iOS): under sustained thermal pressure it lowers `sceneResolutionScale` and restores the
 user's own value once the phone cools. It only acts while 117 HD is the live renderer, and while throttled it
 records the true baseline (a marker file on Android, a user-defaults key on iOS) so a session killed mid-throttle
-cannot make the throttled value permanent. On iOS, a player who moves the setting sets a new baseline: the governor
-compares the live value before each write, but only once its own last write has landed (`getProcessedWriteId`),
-because bridge writes queue on the client thread, and that thread can stall for minutes.
+cannot make the throttled value permanent. On iOS that marker goes only after a flush has run: a write that has
+landed is only in memory, because iOS runs no periodic config save. A player who moves the setting sets a new
+baseline: the governor compares the live value before each write, and waits for every queued config write to land
+first (`mobileConfigWritesLanded`), because they queue on the client thread and that thread can stall for minutes.
 
 iOS also limits the frame rate, on every renderer. `RMHeatPolicy` (`ios/app/RuneMobile/RMHeat.m`) maps the phone's
 state to limits, and `heatTick` applies them. The values are starting values, not measured ones:

@@ -8,7 +8,9 @@ renderer this boots to the login screen and checks that:
   - a critical phone holds it to 20 fps, and the report shows the state, the limit and the frame rate
 On the first renderer it also checks the limit comes off a step after a minute of calm. On 117HD it moves the
 resolution setting as a player would, before and during a throttle, and checks the player's value is the one that
-comes back. Then, last, it boots with no saved renderer, as a new install does, and checks the app picks base GPU.
+comes back, then kills the app mid-throttle with that throttle saved and checks the next launch puts the player's
+value on disk before it drops the marker. Then, last, it boots with no saved renderer, as a new install does, and
+checks the app picks base GPU.
 
 What the simulator can't say: how hot any of this runs, or anything in the world. There the GPU modes draw with
 Apple's software renderer at about 3 fps, under every limit, and 117HD sits in its shader compile, so this stays at
@@ -163,6 +165,47 @@ def check_players_scale(run):
         run.problems.append(f"the limit didn't clear: {run.now(run.section())}")
 
 
+def saved_scale(drv):
+    """117HD's scale in the saved profile, or None if the profile doesn't set it."""
+    values = []
+    for f in (drv.docs / ".runelite/profiles2").glob("*.properties"):
+        values += re.findall(r"^hd\.sceneResolutionScale=(\d+)", f.read_text(errors="replace"), re.M)
+    return int(values[-1]) if values else None
+
+
+def marker(drv, udid):
+    """The throttle marker in the app's own defaults, through cfprefsd because the app's plist lags it."""
+    prefs = drv.docs.parent / "Library/Preferences" / hs.IOS_BUNDLE_ID
+    r = subprocess.run(["xcrun", "simctl", "spawn", udid, "defaults", "read", str(prefs), "thermalBaselineScale"],
+                       capture_output=True, text=True)
+    return int(r.stdout) if r.returncode == 0 else None
+
+
+def check_killed_mid_throttle(drv, udid):
+    """Critical, saved, killed. The launch after has to get the player's 100 back on disk before the marker goes."""
+    print("killed mid-throttle:", flush=True)
+    problems = []
+    ok, why, _seq = drv.open("config-flush")
+    if not ok:
+        raise sd.DriverError(f"config-flush failed: {why}")
+    time.sleep(3)
+    before = saved_scale(drv)
+    if before is None or before >= 100:
+        return [f"the throttle wasn't saved, so this proves nothing: saved scale {before}"]
+    launch(drv, udid, ["-rendererPref", "117hd", "-RMAutoPlay", "YES", "-RMScreenDriver", "YES", "-RMSkipLogin", "YES"],
+           "LOGIN_SCREEN")
+    end = time.time() + 30
+    while time.time() < end and marker(drv, udid) is not None:
+        time.sleep(1)
+    left, saved = marker(drv, udid), saved_scale(drv)
+    print(f"  saved {before} before; marker {left}, saved {saved} after", flush=True)
+    if left is not None:
+        problems.append(f"the marker is still there: {left}")
+    if saved != 100:
+        problems.append(f"the marker went with {saved} on disk, wanted 100")
+    return problems
+
+
 def check_first_run(drv, udid):
     print("new install:", flush=True)
     subprocess.run(["xcrun", "simctl", "terminate", udid, hs.IOS_BUNDLE_ID], stderr=subprocess.DEVNULL)
@@ -198,6 +241,8 @@ def main():
         drv = sd.Driver(udid)
         for i, renderer in enumerate(args.renderers):
             problems += [f"{renderer}: {p}" for p in check_renderer(drv, udid, renderer, i == 0)]
+            if renderer == "117hd":
+                problems += check_killed_mid_throttle(drv, udid)
         problems += check_first_run(drv, udid)
     except sd.DriverError as e:
         print(f"SIM_HEAT_RED {e}")
