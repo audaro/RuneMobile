@@ -3942,7 +3942,7 @@ static NSString *noteConfigWrite(NSString *ack) {
     jstring jg = (*env)->NewStringUTF(env, group.UTF8String);
     NSString *out = jstringToNS(env, (jstring)(*env)->CallStaticObjectMethod(env, gMuiClass, gMuiResetPlugin, jg));
     (*env)->DeleteLocalRef(env, jg);
-    return out;
+    return noteConfigWrite(out);
 }
 
 // Native Game settings: the frame-rate cap and idle logout time, which ride on the FPS Control and Logout Timer
