@@ -344,7 +344,7 @@ run the shader matrix.
 ### Heat
 
 117 HD has a thermal governor on both ports (`ThermalScaleKeeper.kt`, driven by `ThermalGovernor.kt`, on Android;
-`heatApplyScaleLimit` in `ViewController.m` on iOS): under sustained thermal pressure it lowers
+`RMHeatScaleKeeper` in `RMHeat.m`, driven by `heatTick`, on iOS): under sustained thermal pressure it lowers
 `sceneResolutionScale` and restores the user's own value once the phone cools. It only acts while 117 HD is the live
 renderer, and while throttled it records the true baseline (a marker file on Android, a user-defaults key on iOS) so
 a session killed mid-throttle cannot make the throttled value permanent.
@@ -353,18 +353,18 @@ The ports keep the same three rules, because of how config writes behave:
 
 - **A recovery waits for the bridge.** A write before the JVM is up is dropped, and the governor arms at launch. It
   retries, keeping the marker, until the bridge takes the write.
-- **The marker goes only once the player's value is on disk.** On Android it is also written before the lowered value
-  is queued, and no throttle happens if it can't be. A write that has landed is only in memory: iOS runs no
-  periodic config save, and Android's comes every few minutes. iOS queues a flush behind the write and waits for its
-  id. Android's `flushConfig` saves at once and doesn't wait for the queue, so it waits for the queue to drain first.
+- **The marker goes down before the throttle and comes up after the player's value is on disk.** No throttle happens
+  if the marker can't be written, and a player's move isn't adopted until the marker has it. A write that has landed
+  is only in memory: iOS runs no periodic config save, and Android's comes every few minutes. iOS queues a flush behind
+  the write and waits for its id. Android's `flushConfig` saves at once and doesn't wait for the queue, so it waits for
+  the queue to drain first.
 - **A player who moves the setting sets a new baseline.** The governor compares the live value before each write,
   and first waits for every queued config write to land (`mobileConfigWritesLanded`, `configWritesLanded`), because
   they queue on the client thread and that thread can stall for minutes.
 
-While throttled, Android reads the live value on every pass, about every 2 s, so a player's move reaches the marker
-before a kill can come; the limit still holds, so the setting drops back until the phone cools. iOS reads it only
-when it is about to write, so a player who moves the setting during a steady throttle and is then killed gets the
-older baseline back on the next launch.
+While a limit is in force, both read the live value on every pass, every second or two, so a player's move reaches
+the marker before a kill can come. The limit holds over it, so the setting drops back until the phone cools, and that
+goes for a scale raised from under the limit too. A cool phone reads nothing.
 
 iOS also limits the frame rate, on every renderer. `RMHeatPolicy` (`ios/app/RuneMobile/RMHeat.m`) maps the phone's
 state to limits, and `heatTick` applies them. The values are starting values, not measured ones:

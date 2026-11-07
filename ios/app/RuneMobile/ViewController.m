@@ -265,7 +265,7 @@ static NSString *RMPasteLine(NSString *s) {
     return s;
 }
 
-@interface ViewController () <UITextFieldDelegate, UITableViewDataSource, UITableViewDelegate, UIGestureRecognizerDelegate, SFSafariViewControllerDelegate, UNUserNotificationCenterDelegate, AVPictureInPictureControllerDelegate, AVPictureInPictureSampleBufferPlaybackDelegate, UISearchBarDelegate, OverlayEditHudHost> {
+@interface ViewController () <RMHeatScaleStore, UITextFieldDelegate, UITableViewDataSource, UITableViewDelegate, UIGestureRecognizerDelegate, SFSafariViewControllerDelegate, UNUserNotificationCenterDelegate, AVPictureInPictureControllerDelegate, AVPictureInPictureSampleBufferPlaybackDelegate, UISearchBarDelegate, OverlayEditHudHost> {
     // Game-canvas centres of each tab stone (updated each chrome refresh), used to proxy a tap onto the live
     // desktop stone. A C array, so it lives as an ivar rather than a property.
     CGPoint _tabCentres[14];
@@ -658,19 +658,16 @@ static NSString *RMPasteLine(NSString *s) {
 // second or two from onDisplayTick, and every 5 s from the background pump, because the display link stops there.
 // RMHeatPolicy picks the limits: a frame rate on every renderer, which is held in memory on the Java side and so has
 // nothing to undo, and on 117HD a lower sceneResolutionScale, never above the player's own baseline, restored once the
-// phone cools. Polled (main thread, which the mobile* bridge selectors require) rather than driven by the thermal
+// phone cools by RMHeatScaleKeeper. Polled (main thread, which the mobile* bridge selectors require) rather than driven by the thermal
 // notification: the tick gives the scale's two correctness guards their retry loop for free: the baseline is captured
 // ONLY from a real live sceneResolutionScale (config not readable yet -> defer, never guess), and a leaked
 // NSUserDefaults marker from a session killed mid-throttle is restored before arming (the bridge write PERSISTS config,
 // so a throttle must never become the next session's "baseline").
 @property (nonatomic, strong) RMHeatPolicy *heatPolicy;
+@property (nonatomic, strong) RMHeatScaleKeeper *heatScaleKeeper;
 @property (nonatomic, assign) int heatFpsLimit;         // the frame-rate limit the game last accepted, 0 for none
 @property (nonatomic, assign) long heatEngineFrames;    // the engine's frame counter at the last reading
 @property (nonatomic, assign) long heatPresentedFrames; // the direct present's, likewise
-@property (nonatomic, assign) int thermalBaselineScale; // <=0 (the ivar default) = not captured yet
-@property (nonatomic, assign) int thermalAppliedScale;  // last scale this governor wrote (valid once captured)
-@property (nonatomic, assign) BOOL thermalMarkerRetiring;     // the marker can go once the config is on disk
-@property (nonatomic, assign) long long thermalMarkerFlushId; // the flush that puts it there, 0 until one is queued
 @property (nonatomic, strong) UIView *pluginPanel;
 @property (nonatomic, strong) UITableView *pluginTable;
 @property (nonatomic, strong) NSArray<NSDictionary *> *pluginList;  // the FILTERED view the table renders
@@ -5895,11 +5892,11 @@ static const CFTimeInterval kKeepAwakeGrace = 10.0;
 // PERF-MEMORY-THERMAL-01: read the LIVE 117HD sceneResolutionScale off the config bridge. Returns -1 while
 // the config isn't readable (bridge not up / plugin config not loaded) so the caller defers instead of
 // restoring a wrong default — the governor must never raise a user's deliberately lower scale.
-- (int)thermalReadLiveScale {
+- (int)heatReadScale {
     NSString *json = [JVMLauncher mobilePluginConfig:@"hd"];
     if (json.length == 0)
         return -1;
-    NSDictionary *d = parseBridgeJSON(json, "ViewController.thermalReadLiveScale");
+    NSDictionary *d = parseBridgeJSON(json, "ViewController.heatReadScale");
     if (![d isKindOfClass:[NSDictionary class]])
         return -1;
     for (NSDictionary *item in d[@"items"]) {
@@ -5919,7 +5916,8 @@ static int simHeatLowPower = -1;
 #endif
 
 // One look at the phone: sets the limits its heat calls for, and leaves a reading for Share logs. See the property
-// block for the contract. Cheap: a frame-counter read and an enum compare, plus a bridge write on a change.
+// block for the contract. Cheap: a frame-counter read and an enum compare, plus a bridge write on a change, and on
+// 117HD a read of its config while a limit is in force.
 - (void)heatTick {
     NSProcessInfo *pi = [NSProcessInfo processInfo];
     NSInteger thermal = pi.thermalState;
@@ -5933,6 +5931,7 @@ static int simHeatLowPower = -1;
     UIDevice *device = [UIDevice currentDevice];
     if (!self.heatPolicy) {
         self.heatPolicy = [[RMHeatPolicy alloc] init];
+        self.heatScaleKeeper = [[RMHeatScaleKeeper alloc] initWithStore:self];
         device.batteryMonitoringEnabled = YES;
     }
     CFTimeInterval now = CACurrentMediaTime();
@@ -5944,7 +5943,7 @@ static int simHeatLowPower = -1;
     }
     // A backgrounded app may not touch the GPU, and 117HD does to change its scale. The step waits for the foreground.
     if (self.pendingRouteCZone && !self.appBackgrounded)
-        [self heatApplyScaleLimit:limit.scalePercent thermal:thermal];
+        [self.heatScaleKeeper stepWithLimit:limit.scalePercent thermal:thermal];
 
     // Whichever counter moved: the engine's, or the frames handed to the screen, because 117HD's direct present never
     // bumps the engine's, and before the world loads it is the engine that draws.
@@ -5961,8 +5960,8 @@ static int simHeatLowPower = -1;
         .batteryState = (int)device.batteryState,
         .batteryLevel = device.batteryLevel,
         .fpsLimit = self.heatFpsLimit,
-        .scalePercent = self.pendingRouteCZone ? MAX(0, self.thermalAppliedScale) : 0,
-        .baselineScale = self.pendingRouteCZone ? MAX(0, self.thermalBaselineScale) : 0,
+        .scalePercent = self.pendingRouteCZone ? self.heatScaleKeeper.appliedScale : 0,
+        .baselineScale = self.pendingRouteCZone ? self.heatScaleKeeper.baselineScale : 0,
     };
     [RMHeatLog.shared addReading:reading at:now];
 }
@@ -5975,99 +5974,32 @@ static int simHeatLowPower = -1;
     return [ack hasPrefix:@"{\"ok\":true"];
 }
 
-// The marker brings the player's value back if the app dies with a throttled one in the config, so it stays until
-// their value is on disk. A write that has landed is only in memory: iOS runs no periodic save, so this queues a
-// flush behind the writes and heatSettleMarker removes the marker once that has run.
-- (void)heatRetireMarker {
-    if ([[NSUserDefaults standardUserDefaults] objectForKey:@"thermalBaselineScale"])
-        self.thermalMarkerRetiring = YES;
+- (BOOL)heatWritesLanded {
+    return [JVMLauncher mobileConfigWritesLanded];
 }
 
-- (void)heatKeepMarker:(int)baseline {
-    [[NSUserDefaults standardUserDefaults] setInteger:baseline forKey:@"thermalBaselineScale"];
-    self.thermalMarkerRetiring = NO;
-    self.thermalMarkerFlushId = 0;
+- (long long)heatQueueSave {
+    return [JVMLauncher mobileFlushConfig];
 }
 
-- (void)heatSettleMarker {
-    if (!self.thermalMarkerRetiring)
-        return;
-    if (self.thermalMarkerFlushId == 0) {
-        self.thermalMarkerFlushId = [JVMLauncher mobileFlushConfig]; // 0 if it can't queue yet: next tick
-    } else if ([JVMLauncher mobileProcessedWriteId] >= self.thermalMarkerFlushId) {
-        [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"thermalBaselineScale"];
-        self.thermalMarkerRetiring = NO;
-        self.thermalMarkerFlushId = 0;
-    }
+- (long long)heatProcessedWriteId {
+    return [JVMLauncher mobileProcessedWriteId];
 }
 
-// 117HD's half of a heat limit: holds sceneResolutionScale to `limitPercent` (0 for no limit) and never above the
-// player's own value. Cheap while waiting (one early-out or one JSON parse); after the baseline is captured it's a
-// compare plus at most one bridge write per change.
-- (void)heatApplyScaleLimit:(int)limitPercent thermal:(NSInteger)thermal {
+- (int)heatReadMarker {
+    return (int)[[NSUserDefaults standardUserDefaults] integerForKey:@"thermalBaselineScale"];
+}
+
+// setInteger already survives the app being killed straight after. synchronize is here for its result: nothing else
+// says the write failed, and a throttle needs to know.
+- (BOOL)heatWriteMarker:(int)baseline {
     NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
-    if (self.thermalBaselineScale <= 0) {
-        // Self-heal a leaked throttle first (a prior session killed mid-throttle never restored — the
-        // persisted config still holds the stepped-down value). The marker records the TRUE baseline.
-        int leaked = (int)[ud integerForKey:@"thermalBaselineScale"];
-        if (leaked > 0) {
-            if (![self heatWriteScale:leaked])
-                return; // bridge not up yet — retry next tick, keep the marker
-            self.thermalBaselineScale = leaked;
-            self.thermalAppliedScale = leaked;
-            [self heatRetireMarker];
-            [self appendLine:[NSString stringWithFormat:
-                                           @"[shell] thermal: recovered a leaked throttle -> restored sceneResolutionScale=%d", leaked]];
-        } else {
-            int live = [self thermalReadLiveScale];
-            if (live <= 0)
-                return; // config not ready — defer rather than guess a baseline
-            self.thermalBaselineScale = live;
-            self.thermalAppliedScale = live;
-            [self appendLine:[NSString stringWithFormat:
-                                           @"[shell] thermal governor armed (117HD) — baseline sceneResolutionScale=%d", live]];
-        }
-    }
-    [self heatSettleMarker];
-    // Never above the baseline, so a low-res user config is honoured.
-    int baseline = self.thermalBaselineScale;
-    int target = limitPercent > 0 ? MIN(baseline, limitPercent) : baseline;
-    if (target == self.thermalAppliedScale)
-        return;
-    // Bridge writes queue on the client thread, which can stall for minutes in a scene load or a shader compile. While
-    // any wait the live value isn't what it will be, and a write now would land on top of a player's. So wait: adopting
-    // a stale value could make a throttle permanent, and no timer can stand in for this.
-    if (![JVMLauncher mobileConfigWritesLanded])
-        return;
-    // About to write, so first see if the player has moved the setting since the last write: theirs is the new
-    // baseline, or cooling down would put the old value back.
-    int live = [self thermalReadLiveScale];
-    if (live <= 0)
-        return; // config not readable: retry next tick
-    if (live != self.thermalAppliedScale) {
-        [self appendLine:[NSString stringWithFormat:@"[shell] thermal: player set sceneResolutionScale=%d (was %d)", live,
-                                                    self.thermalAppliedScale]];
-        baseline = live;
-        self.thermalBaselineScale = live;
-        self.thermalAppliedScale = live;
-        if ([ud objectForKey:@"thermalBaselineScale"])
-            [ud setInteger:live forKey:@"thermalBaselineScale"];
-        target = limitPercent > 0 ? MIN(live, limitPercent) : live;
-        if (target == live) {
-            [self heatRetireMarker];
-            return;
-        }
-    }
-    if (![self heatWriteScale:target])
-        return; // write didn't take — leave appliedScale unchanged so the next tick retries
-    int prev = self.thermalAppliedScale;
-    self.thermalAppliedScale = target;
-    if (target < baseline)
-        [self heatKeepMarker:baseline];
-    else
-        [self heatRetireMarker];
-    [self appendLine:[NSString stringWithFormat:
-                                   @"[shell] thermal state=%ld -> sceneResolutionScale %d->%d (baseline=%d)", (long)thermal, prev, target, baseline]];
+    [ud setInteger:baseline forKey:@"thermalBaselineScale"];
+    return [ud synchronize];
+}
+
+- (void)heatClearMarker {
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"thermalBaselineScale"];
 }
 
 - (void)updateChrome {

@@ -36,8 +36,9 @@ or install stops it early.
    report and fall under it (`SIM_HEAT_GREEN`). A renderer that doesn't run faster than the limits fails, because
    the check would prove nothing. On 117 HD it also moves the resolution setting as a player would, before and during
    a throttle, and the player's value has to be the one that comes back, then kills the app with a throttle saved and
-   the next launch has to save the player's value before it drops the marker. Then a launch with no saved renderer has
-   to pick base GPU. About eight minutes in all.
+   the next launch has to save the player's value before it drops the marker. It kills it again after a move during a
+   steady throttle, where the limit has to hold and the move has to reach the marker. Then a launch with no saved
+   renderer has to pick base GPU. About eight minutes in all.
 7. **log scan**: `tools/log-scan/log-scan.py` over the `jvm-stdio.log` and `hello-shell.log` of every launch
    above. It fails on any line that isn't on the known-noise list (`tools/log-scan/known-noise.json`), on any
    shader error (the noise list can't excuse those), and when a launch that passed left no logs of its own.

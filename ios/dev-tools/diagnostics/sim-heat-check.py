@@ -9,8 +9,9 @@ renderer this boots to the login screen and checks that:
 On the first renderer it also checks the limit comes off a step after a minute of calm. On 117HD it moves the
 resolution setting as a player would, before and during a throttle, and checks the player's value is the one that
 comes back, then kills the app mid-throttle with that throttle saved and checks the next launch puts the player's
-value on disk before it drops the marker. Then, last, it boots with no saved renderer, as a new install does, and
-checks the app picks base GPU.
+value on disk before it drops the marker. It does that again with a player's move during a steady throttle: the limit
+has to hold, and the move has to reach the marker before the kill. Then, last, it boots with no saved renderer, as a
+new install does, and checks the app picks base GPU.
 
 What the simulator can't say: how hot any of this runs, or anything in the world. There the GPU modes draw with
 Apple's software renderer at about 3 fps, under every limit, and 117HD sits in its shader compile, so this stays at
@@ -147,10 +148,11 @@ def check_renderer(drv, udid, renderer, lift):
 
 
 def check_players_scale(run):
-    """The player's own value survives the governor, whichever side of a throttle they set it. 100 is left behind."""
+    """The player's own value survives the governor, whichever side of a throttle they set it, and the limit reaches
+    a value raised from under it. 100 is left behind."""
     for step, want in (("hd-scale 80", None), ("heat 2 0", "117HD scale 65 of 80"), ("hd-scale 90", None),
-                       ("heat 0 0", "117HD scale 90 of 90"), ("hd-scale 100", None), ("heat 2 0", "117HD scale 65 of 100"),
-                       ("heat 0 0", "117HD scale 100 of 100")):
+                       ("heat 0 0", "117HD scale 90 of 90"), ("hd-scale 40", None), ("heat 2 0", "117HD scale 40 of 40"),
+                       ("hd-scale 100", "117HD scale 65 of 100"), ("heat 0 0", "117HD scale 100 of 100")):
         ok, why, _seq = run.drv.open(step)
         if not ok:
             raise sd.DriverError(f"{step} failed: {why}")
@@ -206,6 +208,47 @@ def check_killed_mid_throttle(drv, udid):
     return problems
 
 
+def check_moved_during_steady_throttle(drv, udid):
+    """Critical and holding, so the governor has nothing to write. A player's 80 still has to survive a kill."""
+    print("a player moves the setting during a steady throttle, and is killed:", flush=True)
+    run = Run(drv)
+    run.heat(3, 0)
+    if not run.wait_for("117HD scale 50 of 100", 90):
+        return [f"no throttle to move under: {run.now(run.section())}"]
+    ok, why, _seq = drv.open("hd-scale 80")
+    if not ok:
+        raise sd.DriverError(f"hd-scale failed: {why}")
+    problems = []
+    if not run.wait_for("117HD scale 50 of 80", LIMIT_WAIT):
+        problems.append(f"the limit didn't hold over the player's 80: {run.now(run.section())}")
+    end = time.time() + LIMIT_WAIT
+    while time.time() < end and marker(drv, udid) != 80:
+        time.sleep(1)
+    held = marker(drv, udid)
+    if held != 80:
+        problems.append(f"marker {held} after the player's move, wanted 80")
+    ok, why, _seq = drv.open("config-flush")
+    if not ok:
+        raise sd.DriverError(f"config-flush failed: {why}")
+    time.sleep(3)
+    before = saved_scale(drv)
+    launch(drv, udid, ["-rendererPref", "117hd", "-RMAutoPlay", "YES", "-RMScreenDriver", "YES", "-RMSkipLogin", "YES"],
+           "LOGIN_SCREEN")
+    end = time.time() + 30
+    while time.time() < end and marker(drv, udid) is not None:
+        time.sleep(1)
+    left, saved = marker(drv, udid), saved_scale(drv)
+    print(f"  killed with {before} saved, marker {held}; marker {left}, saved {saved} after", flush=True)
+    if left is not None:
+        problems.append(f"the marker is still there: {left}")
+    if saved != 80:
+        problems.append(f"the player's 80 didn't survive the kill: saved scale {saved}")
+    drv.open("hd-scale 100")
+    time.sleep(2)
+    drv.open("config-flush")
+    return problems
+
+
 def check_first_run(drv, udid):
     print("new install:", flush=True)
     subprocess.run(["xcrun", "simctl", "terminate", udid, hs.IOS_BUNDLE_ID], stderr=subprocess.DEVNULL)
@@ -243,6 +286,7 @@ def main():
             problems += [f"{renderer}: {p}" for p in check_renderer(drv, udid, renderer, i == 0)]
             if renderer == "117hd":
                 problems += check_killed_mid_throttle(drv, udid)
+                problems += check_moved_during_steady_throttle(drv, udid)
         problems += check_first_run(drv, udid)
     except sd.DriverError as e:
         print(f"SIM_HEAT_RED {e}")

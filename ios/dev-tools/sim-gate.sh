@@ -12,7 +12,8 @@
 # failed build or install does.
 #   0. redaction         diagnostics/test-redaction.sh: the "Share logs" redaction (RMRedact.m, built for the
 #                        Mac) against tools/diagnostics/redaction-cases.txt, the cases Android's RedactTest checks
-#      heat policy       diagnostics/test-heat.sh: the heat limits and the Share logs readings (RMHeat.m, on the Mac)
+#      heat policy       diagnostics/test-heat.sh: the heat limits, the 117HD scale keeper and the Share logs readings
+#                        (RMHeat.m, on the Mac)
 #   1. build + install   ./run-sim.sh --no-launch
 #   2. census            bridge-census/run-census-sim.sh: every JNI lookup the native code makes resolves
 #   3. screens           sim-screens/sim-screens.py: the native screens match their goldens

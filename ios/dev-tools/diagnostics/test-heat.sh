@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds the app's RMHeat.m for the Mac and checks the heat limits and the session log. Expect HEAT_POLICY_GREEN.
+# Builds the app's RMHeat.m for the Mac and checks the heat limits, the 117HD scale keeper and the session log. Expect
+# HEAT_POLICY_GREEN.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"

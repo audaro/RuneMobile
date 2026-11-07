@@ -50,6 +50,123 @@ static const NSTimeInterval kMaxGapSeconds = 30.0;
 
 @end
 
+@implementation RMHeatScaleKeeper {
+    __weak id<RMHeatScaleStore> _store; // it owns this
+    BOOL _markerRetiring;               // the marker can go once the player's value is on disk
+    long long _markerSaveId;            // the save that puts it there, 0 until one is queued
+}
+
+- (instancetype)initWithStore:(id<RMHeatScaleStore>)store {
+    self = [super init];
+    if (self)
+        _store = store;
+    return self;
+}
+
+- (void)stepWithLimit:(int)limitPercent thermal:(NSInteger)thermal {
+    if (_baselineScale <= 0 && ![self arm])
+        return;
+    [self settleMarker];
+    // Cool, with nothing to put back, is the one time there's nothing to look at. Under a limit a player's move has to
+    // reach the marker before a kill can come, and the limit has to go over it, wherever the scale was before.
+    if (limitPercent == 0 && _appliedScale == _baselineScale)
+        return;
+    // No write can be judged, or made, until the queue is empty. Adopting a stale value could make a throttle
+    // permanent, and no timer can stand in for this.
+    if (![_store heatWritesLanded])
+        return;
+    int live = [_store heatReadScale];
+    if (live <= 0)
+        return;
+    // The player has moved the setting since the last write: theirs is the new baseline, or cooling down would put the
+    // old value back.
+    if (live != _appliedScale && ![self adoptPlayersScale:live])
+        return;
+    int target = [self scaleForLimit:limitPercent];
+    if (target != _appliedScale)
+        [self write:target thermal:thermal];
+    else if (target == _baselineScale)
+        [self retireMarker]; // a player's own value, and otherwise a throttle that's holding
+}
+
+// NO while the player's value isn't known. A marker comes first: it's from a session killed mid-throttle, so the config
+// holds the lowered value.
+- (BOOL)arm {
+    int leaked = [_store heatReadMarker];
+    int known = leaked > 0 ? leaked : [_store heatReadScale];
+    // Never guess a baseline: a wrong default could raise a player's lower scale.
+    if (known <= 0 || (leaked > 0 && ![_store heatWriteScale:leaked]))
+        return NO;
+    _baselineScale = known;
+    _appliedScale = known;
+    if (leaked > 0) {
+        _markerRetiring = YES;
+        [_store appendLine:[NSString stringWithFormat:
+                                         @"[shell] thermal: recovered a leaked throttle -> restored sceneResolutionScale=%d", leaked]];
+    } else {
+        [_store appendLine:[NSString stringWithFormat:
+                                         @"[shell] thermal governor armed (117HD) - baseline sceneResolutionScale=%d", known]];
+    }
+    return YES;
+}
+
+- (void)write:(int)target thermal:(NSInteger)thermal {
+    BOOL throttling = target < _baselineScale;
+    // The marker goes down first and has to take: a lowered value must never reach the disk without one.
+    if (throttling && ![_store heatWriteMarker:_baselineScale])
+        return;
+    if (![_store heatWriteScale:target]) {
+        if (_appliedScale == _baselineScale)
+            [self retireMarker]; // nothing was lowered after all, and a stale marker could overwrite a player's later move
+        return;
+    }
+    int prev = _appliedScale;
+    _appliedScale = target;
+    if (throttling) {
+        _markerRetiring = NO;
+        _markerSaveId = 0;
+    } else {
+        [self retireMarker];
+    }
+    [_store appendLine:[NSString stringWithFormat:@"[shell] thermal state=%ld -> sceneResolutionScale %d->%d (baseline=%d)",
+                                                  (long)thermal, prev, target, _baselineScale]];
+}
+
+// NO if the marker can't follow, because a kill would then bring back the old value. Nothing moves until it can.
+- (BOOL)adoptPlayersScale:(int)live {
+    if ([_store heatReadMarker] > 0 && ![_store heatWriteMarker:live])
+        return NO;
+    [_store appendLine:[NSString stringWithFormat:@"[shell] thermal: player set sceneResolutionScale=%d (was %d)", live,
+                                                  _appliedScale]];
+    _baselineScale = live;
+    _appliedScale = live;
+    return YES;
+}
+
+- (void)retireMarker {
+    if ([_store heatReadMarker] > 0)
+        _markerRetiring = YES;
+}
+
+- (void)settleMarker {
+    if (!_markerRetiring)
+        return;
+    if (_markerSaveId == 0) {
+        _markerSaveId = [_store heatQueueSave]; // 0 if it can't queue yet: next tick
+    } else if ([_store heatProcessedWriteId] >= _markerSaveId) {
+        [_store heatClearMarker];
+        _markerRetiring = NO;
+        _markerSaveId = 0;
+    }
+}
+
+// Never above the baseline, so a low-res user config is honoured.
+- (int)scaleForLimit:(int)limitPercent {
+    return limitPercent > 0 ? MIN(_baselineScale, limitPercent) : _baselineScale;
+}
+
+@end
+
 static NSString *thermalName(NSInteger state) {
     static NSString *const names[] = {@"nominal", @"fair", @"serious", @"critical"};
     return (state >= 0 && state <= kHottest) ? names[state] : @"?";
