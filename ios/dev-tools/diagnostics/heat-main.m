@@ -153,6 +153,17 @@ static void checkTiming(void) {
     report = [log report];
     check(has(report, @"frame 40.0  cpu 20.0  gpu 10.0  worst 40.0 (cpu 20.0 gpu 10.0)"),
           [NSString stringWithFormat:@"away isn't slow frames, or a stall:\n%@", report]);
+
+    // Back after five seconds away, with one frame drawn so far: that reading says nothing about the frames.
+    log = [RMHeatLog new];
+    [log addReading:away at:0];
+    [log addReading:away at:5];
+    [log addReading:timedReading(1, 0.01, 0.0, 0.1) at:10];
+    for (int i = 1; i <= 30; i++)
+        [log addReading:timedReading(50, 1.0, 0.5, 3.0) at:10 + i * 2];
+    report = [log report];
+    check(has(report, @"frame 40.0  cpu 20.0  gpu 10.0  worst 40.0 (cpu 20.0 gpu 10.0)"),
+          [NSString stringWithFormat:@"a quick return isn't a stall:\n%@", report]);
 }
 
 static void checkLog(void) {

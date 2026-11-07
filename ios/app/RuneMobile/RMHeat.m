@@ -248,6 +248,8 @@ static NSString *msText(double ms) {
             return;
         }
         NSTimeInterval gap = now - _lastAt;
+        // On screen at both ends: the first reading back spans the time away, with hardly a frame to show for it.
+        BOOL onScreen = !_latest.background && !r.background;
         _lastAt = now;
         _latest = r;
         if (gap <= 0)
@@ -267,7 +269,7 @@ static NSString *msText(double ms) {
         _windowHottest = MAX(_windowHottest, r.thermalState);
         _windowBackground = _windowBackground || r.background;
         _windowAppCpu += r.appCpuSeconds;
-        if (!r.background)
+        if (onScreen)
             [self noteTiming:r over:gap];
         if (_windowSeconds >= kLineSeconds)
             [self closeWindowAt:now];
