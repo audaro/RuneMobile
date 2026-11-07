@@ -113,20 +113,14 @@
 }
 
 + (NSString *)recommendedRendererTier {
-    // 117HD is the clean high-end path; base GPU is the mid path; CPU is the safe floor. Query the two decisive
-    // signals: the Metal GPU family (Apple7+ has compute + GLES3.1-equiv features — the 117HD requirement) and a
-    // live native ES3 context that can render+read back an offscreen FBO (the base-GPU int[] blit path). Any
-    // failure short-circuits to CPU. Mirrors Android probeGpuCaps()'s tier -> {117hd, gpu, cpu} mapping.
+    // Base GPU when a live native ES3 context can render+read back an offscreen FBO (its int[] blit path), else CPU.
+    // Never 117HD, though every recent iPhone can run it: a phone left on it works its GPU flat out and gets hot,
+    // while the base plugin leaves the GPU idle most of each frame and the CPU renderer pins a core to rasterize.
+    // 117HD stays one tap away in the plugins panel for a player who wants it. Any failure short-circuits to CPU.
     @try {
-        BOOL metalHiTier = NO;
-        id<MTLDevice> mtl = MTLCreateSystemDefaultDevice();
-        if (mtl && @available(iOS 13.0, *)) {
-            metalHiTier = [mtl supportsFamily:MTLGPUFamilyApple7] || [mtl supportsFamily:MTLGPUFamilyApple8] || [mtl supportsFamily:MTLGPUFamilyApple9];
-        }
-
         EAGLContext *ctx = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES3];
         if (!ctx) {
-            return @"cpu"; // no native ES3 at all -> neither GPU tier is reachable
+            return @"cpu"; // no native ES3 at all -> the GPU renderers are out of reach
         }
         EAGLContext *prev = [EAGLContext currentContext];
         if (![EAGLContext setCurrentContext:ctx]) {
@@ -159,13 +153,7 @@
             [EAGLContext setCurrentContext:prev]; // always restore the caller's context, even if the probe threw
         }
 
-        if (fboOk && metalHiTier) {
-            return @"117hd";
-        }
-        if (fboOk) {
-            return @"gpu";
-        }
-        return @"cpu";
+        return fboOk ? @"gpu" : @"cpu";
     }
     @catch (__unused NSException *e) {
         return @"cpu"; // any probe fault -> the safe default; the crash cookie is the true net
@@ -183,9 +171,7 @@
 }
 + (NSString *)recommendedRendererTier {
     // MetalANGLE build: EAGL is compiled out, so we can't run the native ES3 FBO probe the active build uses to
-    // gate the tier. Default to base GPU (@"gpu") rather than @"117hd" - ANGLE gives ES3.1+compute over Metal so
-    // 117HD is usually reachable, but without the live probe we don't assert the top tier here; the user can opt
-    // up in the renderer picker, and the boot crash-cookie is the recovery net either way.
+    // gate the tier. Base GPU, the same default as the EAGL build; the boot crash-cookie is the recovery net.
     return @"gpu";
 }
 @end

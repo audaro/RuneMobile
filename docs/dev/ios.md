@@ -192,7 +192,7 @@ What happens between the app icon and the first frame, in order:
 2. **JIT check.** A 0.2 s timer calls `+[JVMLauncher isDebuggerAttached]`, which reads the process's
    `CS_DEBUGGED` flag with `csops`. In the Simulator it always returns YES.
 3. **Renderer choice.** Tap to Play reads `rendererPref` (`cpu`, `gpu` or `117hd`) from `NSUserDefaults`. On a
-   first run with no preference, `GLRecon` probes the GPU and picks one. A crash cookie written before a GPU or
+   first run with no preference, `GLRecon` probes the GPU and picks `gpu`, or `cpu` if the probe fails. A crash cookie written before a GPU or
    117 HD boot reverts the next launch to CPU if the boot never finished, and sets `autoGpuFailed` so the probe
    doesn't promote again.
 4. **Login check.** If the in-app login ran in this process, the app asks for a restart instead of booting (see
@@ -555,7 +555,7 @@ the Simulator window to landscape before taking screenshots.
 3. After a native-UI change, run `ios/dev-tools/sim-screens/sim-screens.py` and look at any diff before you
    `--update` a golden.
 4. Before a release, after an upstream merge, or after a shader or renderer change, run
-   `ios/dev-tools/sim-gate.sh` (expect `SIM_GATE_GREEN`, about ten minutes).
+   `ios/dev-tools/sim-gate.sh` (expect `SIM_GATE_GREEN`, about seventeen minutes).
 5. For anything the Simulator can't show (touch feel, performance, the GPU driver, backgrounding), install on a
    phone and check the bundle as above.
 

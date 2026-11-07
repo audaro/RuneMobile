@@ -17,11 +17,10 @@ NS_ASSUME_NONNULL_BEGIN
 @interface GLRecon : NSObject
 + (void)runWithLog:(void (^)(NSString *line))log;
 
-/// First-run renderer auto-probe (iOS analogue of Android's probeGpuCaps): stands up a throwaway EAGL ES3 context
-/// + queries the Metal GPU family, and maps the device's real capability to a recommended default renderer —
-/// @"117hd" (Metal Apple7+, i.e. GLES3.1-equiv + compute — the clean Zone path), else @"gpu" (native ES3 context
-/// + a working offscreen FBO readback — base GPU), else @"cpu" (the always-works safe default; also on any probe
-/// failure). Optimistic gate only; the boot crash-cookie is the recovery net. Pure-native, no JVM. Main thread.
+/// First-run renderer auto-probe (iOS analogue of Android's probeGpuCaps): stands up a throwaway EAGL ES3 context and
+/// picks a default renderer: @"gpu" (base GPU, when the context has a working offscreen FBO readback), else @"cpu"
+/// (the always-works safe default; also on any probe failure). Never @"117hd", which a player opts into for its look
+/// and its heat. Optimistic gate only; the boot crash-cookie is the recovery net. Pure-native, no JVM. Main thread.
 + (NSString *)recommendedRendererTier;
 @end
 

@@ -172,8 +172,8 @@ Both ports end up running the same Java boot. They differ in what happens before
 2. **Log in if needed.** With no `tokens.json`, the app shows the Jagex login. That screen uses WebKit, and
    once WebKit has run in a process it takes over the exception port the JIT trap needs. The app therefore
    asks for a one-tap restart after a fresh login, so the VM starts in a clean process.
-3. **Pick a renderer.** On first run `GLRecon` probes the GPU and recommends a default (`117hd`, `gpu` or
-   `cpu`). A crash cookie written before a GPU boot falls the next launch back to CPU if the GPU renderer never
+3. **Pick a renderer.** On first run `GLRecon` probes the GPU and picks a default (`gpu`, or `cpu` if the probe
+   fails). A crash cookie written before a GPU boot falls the next launch back to CPU if the GPU renderer never
    presents a frame.
 4. **Start the VM thread** (`jvm-main`, 16 MB stack) and run `runProbesWithLog:`, which:
    - chooses the RuneLite home (`user.home`), Documents in a Debug build and Application Support in a Release
