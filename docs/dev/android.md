@@ -357,7 +357,7 @@ trusting single screenshots.
 cools. A marker file records the real value while throttled, so a session killed mid-throttle can't make the
 lowered value the next baseline, and the marker goes only once that value is on disk (see
 [Heat](renderers.md#heat)). The governor arms before the JVM is up and is otherwise woken only by a status change,
-so it runs again every 2 s while it has more to do, and for as long as it is throttling.
+so it runs again every 2 s while it has more to do, and for as long as a limit is in force.
 `android/dev-tools/diagnostics/heat-check.sh` checks all of this on an emulator.
 
 ## Settings and live config

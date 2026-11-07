@@ -49,12 +49,13 @@ internal class ThermalScaleKeeper(
         val limit = limitFor(status)
         if (baseline < 0 && !arm()) return limit > 0 || store.readMarker() > 0
         settleMarker()
-        // A steady throttle is still looked at: a player's move has to reach the marker before a kill can come.
-        val throttled = applied < baseline
+        // Cool, with nothing to put back, is the one time there's nothing to look at. Under a limit a player's move has
+        // to reach the marker before a kill can come, and the limit has to go over it, wherever the scale was before.
+        val idle = limit == 0 && applied == baseline
         // No write can be judged, or made, until the queue is empty. Adopting a stale value could make a throttle
         // permanent, and no timer can stand in for this.
-        val inPlace = (scaleFor(limit) == applied && !throttled) || (store.writesLanded() && applyLimit(status, limit))
-        return !inPlace || retiringMarker || applied < baseline
+        val inPlace = idle || (store.writesLanded() && applyLimit(status, limit))
+        return !inPlace || retiringMarker || limit > 0
     }
 
     // False while the player's value isn't known. A marker comes first: it's from a session killed mid-throttle, so the
@@ -81,10 +82,9 @@ internal class ThermalScaleKeeper(
         limit: Int,
     ): Boolean {
         val live = store.readScale()
-        if (live <= 0) return false
         // The player has moved the setting since the last write: theirs is the new baseline, or cooling down would put
         // the old value back.
-        if (live != applied) adoptPlayersScale(live)
+        if (live <= 0 || (live != applied && !adoptPlayersScale(live))) return false
         return moveTo(scaleFor(limit), status)
     }
 
@@ -116,11 +116,13 @@ internal class ThermalScaleKeeper(
         return taken
     }
 
-    private fun adoptPlayersScale(live: Int) {
+    // False if the marker can't follow, because a kill would then bring back the old value. Nothing moves until it can.
+    private fun adoptPlayersScale(live: Int): Boolean {
+        if (store.readMarker() > 0 && !store.writeMarker(live)) return false
         log("thermal: player set sceneResolutionScale=$live (was $applied)")
         baseline = live
         applied = live
-        if (store.readMarker() > 0) store.writeMarker(live)
+        return true
     }
 
     private fun retireMarker() {

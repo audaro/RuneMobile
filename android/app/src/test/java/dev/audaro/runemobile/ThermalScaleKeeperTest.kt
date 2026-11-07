@@ -17,6 +17,7 @@ class ThermalScaleKeeperTest {
         var refuseSaves = false
         var configUnreadable = false
         var refuseMarker = false
+        var reads = 0
         val queue = ArrayDeque<Int>()
         val markerWhenQueued = mutableListOf<Int>()
 
@@ -32,7 +33,10 @@ class ThermalScaleKeeperTest {
             disk = live
         }
 
-        override fun readScale() = if (bridgeUp && !configUnreadable) live else -1
+        override fun readScale(): Int {
+            reads++
+            return if (bridgeUp && !configUnreadable) live else -1
+        }
 
         override fun writeScale(scale: Int): Boolean {
             if (!bridgeUp || refuseWrites) return false
@@ -342,6 +346,26 @@ class ThermalScaleKeeperTest {
     }
 
     @Test
+    fun aMoveTheMarkerCantFollowChangesNothingUntilItCan() {
+        val game = FakeGame(100)
+        val keeper = keeper(game)
+        throttled(game, keeper)
+        game.playerSets(90)
+        game.land()
+        game.refuseMarker = true
+        assertTrue(keeper.step(3))
+        assertTrue("no limit over a move the marker doesn't have", game.queue.isEmpty())
+        assertTrue("not adopted yet", logs.none { "player set" in it })
+        assertEquals(100, game.marker)
+
+        game.refuseMarker = false
+        keeper.step(3)
+        assertEquals(90, game.marker)
+        game.land()
+        assertEquals(50, game.live)
+    }
+
+    @Test
     fun aPlayerWhoDropsBelowTheLimitDuringAThrottleEndsIt() {
         val game = FakeGame(100)
         val keeper = keeper(game)
@@ -350,7 +374,7 @@ class ThermalScaleKeeperTest {
         game.land()
         assertTrue("the marker has to go, once their value is saved", keeper.step(3))
         assertTrue(game.queue.isEmpty())
-        assertFalse(keeper.step(3))
+        assertTrue("a limit in force is still looked at", keeper.step(3))
         assertEquals(40, game.disk)
         assertEquals(-1, game.marker)
     }
@@ -360,7 +384,7 @@ class ThermalScaleKeeperTest {
         val game = FakeGame(40)
         val keeper = keeper(game)
         keeper.step(0)
-        assertFalse(keeper.step(3))
+        assertTrue("a limit in force is still looked at", keeper.step(3))
         assertTrue(game.queue.isEmpty())
         assertEquals(-1, game.marker)
     }
@@ -372,10 +396,67 @@ class ThermalScaleKeeperTest {
         keeper.step(0)
         game.playerSets(40)
         game.land()
-        assertFalse(keeper.step(3))
+        assertTrue("a limit in force is still looked at", keeper.step(3))
         assertTrue(game.queue.isEmpty())
         assertEquals(40, game.live)
         assertEquals(-1, game.marker)
+    }
+
+    @Test
+    fun aCoolPhoneDoesntReadTheConfig() {
+        val game = FakeGame(100)
+        val keeper = keeper(game)
+        keeper.step(0)
+        val armed = game.reads
+        repeat(5) { keeper.step(0) }
+        assertEquals(armed, game.reads)
+    }
+
+    @Test
+    fun aPlayerWhoRaisesItFromUnderALimitInForceGetsTheLimit() {
+        val game = FakeGame(40)
+        val keeper = keeper(game)
+        keeper.step(0)
+        keeper.step(3)
+        game.playerSets(100)
+        game.land()
+        assertTrue("under a limit it keeps being looked at", keeper.step(3))
+        game.land()
+        assertEquals(50, game.live)
+        assertEquals(100, game.marker)
+
+        keeper.step(0)
+        game.land()
+        assertFalse(keeper.step(0))
+        assertEquals(100, game.disk)
+        assertEquals(-1, game.marker)
+    }
+
+    @Test
+    fun aPlayerWhoRaisedItFromUnderTheLimitOnACoolPhoneGetsTheLimit() {
+        val game = FakeGame(40)
+        val keeper = keeper(game)
+        keeper.step(0)
+        game.playerSets(100)
+        game.land()
+        assertFalse(keeper.step(0))
+        keeper.step(2)
+        game.land()
+        assertEquals(65, game.live)
+        assertEquals(100, game.marker)
+    }
+
+    @Test
+    fun aPlayerExactlyAtTheLimitWhoRaisesItGetsTheLimit() {
+        val game = FakeGame(50)
+        val keeper = keeper(game)
+        keeper.step(3)
+        game.playerSets(100)
+        game.land()
+        keeper.step(3)
+        game.land()
+        assertEquals(50, game.live)
+        assertEquals(100, game.marker)
     }
 
     @Test
@@ -411,19 +492,35 @@ class ThermalScaleKeeperTest {
 
     @Test
     fun anUnreadableConfigIsNeverGuessedAtAndOnlyRetriedIfThereIsSomethingToDo() {
-        val game = FakeGame(100)
+        val game = FakeGame(80)
         game.bridgeUp = false
         val keeper = keeper(game)
         assertFalse("calm, and no marker: nothing to wait for", keeper.step(0))
         assertTrue("hot: come back", keeper.step(3))
         assertEquals(-1, game.marker)
         assertTrue(game.queue.isEmpty())
+        assertTrue("nothing armed yet", logs.isEmpty())
 
         game.bridgeUp = true
         keeper.step(3)
         game.land()
         assertEquals(50, game.live)
-        assertEquals(100, game.marker)
+        assertEquals(80, game.marker)
+        assertTrue("armed on the real value", logs.none { "player set" in it })
+    }
+
+    @Test
+    fun anUnreadableConfigWhileCoolingDownIsTriedAgain() {
+        val game = FakeGame(100)
+        val keeper = keeper(game)
+        throttled(game, keeper)
+        game.configUnreadable = true
+        assertTrue("the throttle still has to come off", keeper.step(0))
+        assertTrue(game.queue.isEmpty())
+        game.configUnreadable = false
+        keeper.step(0)
+        game.land()
+        assertEquals(100, game.live)
     }
 
     @Test
