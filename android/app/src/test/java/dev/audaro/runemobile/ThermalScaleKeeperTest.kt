@@ -16,7 +16,9 @@ class ThermalScaleKeeperTest {
         var refuseWrites = false
         var refuseSaves = false
         var configUnreadable = false
+        var refuseMarker = false
         val queue = ArrayDeque<Int>()
+        val markerWhenQueued = mutableListOf<Int>()
 
         fun land() {
             while (queue.isNotEmpty()) live = queue.removeFirst()
@@ -35,6 +37,7 @@ class ThermalScaleKeeperTest {
         override fun writeScale(scale: Int): Boolean {
             if (!bridgeUp || refuseWrites) return false
             queue.addLast(scale)
+            markerWhenQueued += marker
             return true
         }
 
@@ -48,8 +51,10 @@ class ThermalScaleKeeperTest {
 
         override fun readMarker() = marker
 
-        override fun writeMarker(baseline: Int) {
+        override fun writeMarker(baseline: Int): Boolean {
+            if (refuseMarker) return false
             marker = baseline
+            return true
         }
 
         override fun clearMarker() {
@@ -174,13 +179,63 @@ class ThermalScaleKeeperTest {
         keeper.step(0)
         game.refuseWrites = true
         assertTrue(keeper.step(2))
-        assertEquals(-1, game.marker)
         game.refuseWrites = false
         keeper.step(2)
         game.land()
         assertEquals(65, game.live)
         assertEquals(100, game.marker)
         assertTrue("a refused write isn't a player's move", logs.none { "player set" in it })
+    }
+
+    @Test
+    fun aThrottleThatWasRefusedLeavesNoMarkerToOverwriteAPlayerLater() {
+        val game = FakeGame(100)
+        val keeper = keeper(game)
+        keeper.step(0)
+        game.refuseWrites = true
+        keeper.step(2)
+        game.refuseWrites = false
+        assertFalse(keeper.step(0))
+        assertEquals(-1, game.marker)
+        assertEquals(100, game.live)
+    }
+
+    @Test
+    fun aRefusedSecondStepKeepsTheMarkerOfTheThrottleInForce() {
+        val game = FakeGame(100)
+        val keeper = keeper(game)
+        keeper.step(2)
+        game.land()
+        game.appSaves()
+        game.refuseWrites = true
+        assertTrue(keeper.step(3))
+        // Easing back to the throttle in force writes nothing, so nothing would put a lost marker back.
+        keeper.step(2)
+        assertEquals(100, game.marker)
+        assertEquals(65, game.disk)
+    }
+
+    @Test
+    fun theMarkerIsDownBeforeAThrottleIsQueued() {
+        val game = FakeGame(100)
+        val keeper = keeper(game)
+        keeper.step(2)
+        assertEquals(listOf(100), game.markerWhenQueued)
+    }
+
+    @Test
+    fun noThrottleWithoutAMarker() {
+        val game = FakeGame(100)
+        val keeper = keeper(game)
+        keeper.step(0)
+        game.refuseMarker = true
+        assertTrue(keeper.step(3))
+        assertTrue(game.queue.isEmpty())
+        game.refuseMarker = false
+        keeper.step(3)
+        game.land()
+        assertEquals(50, game.live)
+        assertEquals(100, game.marker)
     }
 
     @Test

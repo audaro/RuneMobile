@@ -17,7 +17,8 @@ internal interface ThermalScaleStore {
     /** The player's value from the marker, or -1 when there is no marker. */
     fun readMarker(): Int
 
-    fun writeMarker(baseline: Int)
+    /** False if the marker couldn't be written. */
+    fun writeMarker(baseline: Int): Boolean
 
     fun clearMarker()
 }
@@ -91,17 +92,28 @@ internal class ThermalScaleKeeper(
         target: Int,
         status: Int,
     ): Boolean {
-        if (target == applied) {
-            if (target == baseline) retireMarker() // a player's own value, and otherwise a throttle that's holding
-        } else if (store.writeScale(target)) {
+        if (target != applied) return write(target, status)
+        if (target == baseline) retireMarker() // a player's own value, and otherwise a throttle that's holding
+        return true
+    }
+
+    private fun write(
+        target: Int,
+        status: Int,
+    ): Boolean {
+        val throttling = target < baseline
+        // The marker goes down first and has to take: a lowered value must never reach the disk without one.
+        if (throttling && !store.writeMarker(baseline)) return false
+        val taken = store.writeScale(target)
+        if (taken) {
             val prev = applied
             applied = target
-            if (target < baseline) keepMarker() else retireMarker()
+            if (throttling) retiringMarker = false else retireMarker()
             log("thermal status=$status -> sceneResolutionScale $prev->$target (baseline=$baseline)")
-        } else {
-            return false
+        } else if (applied == baseline) {
+            retireMarker() // nothing was lowered after all, and a stale marker could overwrite a player's later move
         }
-        return true
+        return taken
     }
 
     private fun adoptPlayersScale(live: Int) {
@@ -109,11 +121,6 @@ internal class ThermalScaleKeeper(
         baseline = live
         applied = live
         if (store.readMarker() > 0) store.writeMarker(live)
-    }
-
-    private fun keepMarker() {
-        store.writeMarker(baseline)
-        retiringMarker = false
     }
 
     private fun retireMarker() {

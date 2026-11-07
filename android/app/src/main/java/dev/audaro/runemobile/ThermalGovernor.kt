@@ -136,9 +136,7 @@ class ThermalGovernor(
             -1
         }
 
-    private fun writeMarker(baseline: Int) {
-        runCatching { markerFile.writeText(baseline.toString()) }
-    }
+    private fun writeMarker(baseline: Int) = runCatching { markerFile.writeText(baseline.toString()) }.isSuccess
 
     private fun clearMarker() {
         runCatching { if (markerFile.exists()) markerFile.delete() }

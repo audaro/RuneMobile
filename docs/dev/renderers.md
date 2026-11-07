@@ -353,7 +353,8 @@ The ports keep the same three rules, because of how config writes behave:
 
 - **A recovery waits for the bridge.** A write before the JVM is up is dropped, and the governor arms at launch. It
   retries, keeping the marker, until the bridge takes the write.
-- **The marker goes only once the player's value is on disk.** A write that has landed is only in memory: iOS runs no
+- **The marker goes only once the player's value is on disk.** On Android it is also written before the lowered value
+  is queued, and no throttle happens if it can't be. A write that has landed is only in memory: iOS runs no
   periodic config save, and Android's comes every few minutes. iOS queues a flush behind the write and waits for its
   id. Android's `flushConfig` saves at once and doesn't wait for the queue, so it waits for the queue to drain first.
 - **A player who moves the setting sets a new baseline.** The governor compares the live value before each write,
