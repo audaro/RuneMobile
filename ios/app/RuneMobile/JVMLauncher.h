@@ -515,6 +515,9 @@ typedef NS_ENUM(NSInteger, RMJitScriptCheck) {
 + (nullable NSString *)gameSettings;
 /// Cap the frame rate through the FPS Control plugin (0 removes the cap). Ack JSON, nil if unavailable.
 + (nullable NSString *)setFpsCap:(int)fps;
+/// Holds the game to `fps` while the phone is hot, on top of any cap the player set; 0 lifts it (MobileUiBridge
+/// setHeatFpsCap). In memory only, so it saves nothing to the player's profile. NO until the bridge is up: try again.
++ (BOOL)setHeatFpsCap:(int)fps;
 /// Set the idle logout time through the Logout Timer plugin, in minutes. Ack JSON, nil if unavailable.
 + (nullable NSString *)setIdleLogoutMinutes:(int)minutes;
 

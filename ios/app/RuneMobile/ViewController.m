@@ -11,6 +11,7 @@
 #import "RMKeyboardDismiss.h"
 #import "RMResidency.h"
 #import "RMGameSettings.h"
+#import "RMHeat.h"
 #import "RouteCBridge.h"            // GPU Route C bridge (backend selected by RC_BACKEND_ANGLE in the build)
 #import <QuartzCore/QuartzCore.h>
 #if !defined(RC_BACKEND_ANGLE)
@@ -653,18 +654,22 @@ static NSString *RMPasteLine(NSString *s) {
 @property (nonatomic, strong) UIButton *layoutSwitchButton;
 @property (nonatomic, assign) CFTimeInterval layoutUnsupportedSince;
 @property (nonatomic, assign) CFTimeInterval layoutSwitchSentAt;
-// PERF-MEMORY-THERMAL-01 (iOS parity with Android's ThermalGovernor): protect sustained 117HD play from
-// silent thermal throttling by stepping the 117HD sceneResolutionScale DOWN under NSProcessInfo thermal
-// pressure (serious -> 65, critical -> 50, never above the user's own baseline) and restoring the captured
-// baseline once the device cools. CPU/base-GPU are light enough to leave untouched — the governor only runs
-// on a 117HD boot. Driven from onDisplayTick (~0.5 Hz — already main-thread, which the mobile* bridge
-// selectors require) rather than the thermal notification: the tick gives the two correctness guards their
-// retry loop for free — the baseline is captured ONLY from a real live sceneResolutionScale (config not
-// readable yet -> defer, never guess), and a leaked NSUserDefaults marker from a session killed mid-throttle
-// is restored before arming (the bridge write PERSISTS config, so a throttle must never become the next
-// session's "baseline").
+// PERF-MEMORY-THERMAL-01: ease off when the phone gets hot or Low Power Mode is on. heatTick looks at the phone every
+// second or two from onDisplayTick, and every 5 s from the background pump, because the display link stops there.
+// RMHeatPolicy picks the limits: a frame rate on every renderer, which is held in memory on the Java side and so has
+// nothing to undo, and on 117HD a lower sceneResolutionScale, never above the player's own baseline, restored once the
+// phone cools. Polled (main thread, which the mobile* bridge selectors require) rather than driven by the thermal
+// notification: the tick gives the scale's two correctness guards their retry loop for free: the baseline is captured
+// ONLY from a real live sceneResolutionScale (config not readable yet -> defer, never guess), and a leaked
+// NSUserDefaults marker from a session killed mid-throttle is restored before arming (the bridge write PERSISTS config,
+// so a throttle must never become the next session's "baseline").
+@property (nonatomic, strong) RMHeatPolicy *heatPolicy;
+@property (nonatomic, assign) int heatFpsLimit;         // the frame-rate limit the game last accepted, 0 for none
+@property (nonatomic, assign) long heatEngineFrames;    // the engine's frame counter at the last reading
+@property (nonatomic, assign) long heatPresentedFrames; // the direct present's, likewise
 @property (nonatomic, assign) int thermalBaselineScale; // <=0 (the ivar default) = not captured yet
 @property (nonatomic, assign) int thermalAppliedScale;  // last scale this governor wrote (valid once captured)
+@property (nonatomic, assign) long long thermalWriteId; // the bridge's id for that write, to know when it has landed
 @property (nonatomic, strong) UIView *pluginPanel;
 @property (nonatomic, strong) UITableView *pluginTable;
 @property (nonatomic, strong) NSArray<NSDictionary *> *pluginList;  // the FILTERED view the table renders
@@ -1540,16 +1545,16 @@ static NSString *const kLayoutNoticeBody =
     // If the login web view ran this session, WebKit is resident and the JVM can't start cleanly — onLaunch
     // will prompt a restart instead. Keep the cover up in that case so the user lands back here post-restart.
     // Tap to Play boots the renderer the user SELECTED in the plugins panel, saved in NSUserDefaults
-    // "rendererPref" (cpu | gpu | 117hd). Default = cpu (the software renderer — vanilla, always works). The
+    // "rendererPref" (cpu | gpu | 117hd). With nothing saved, the first-run probe below picks one. The
     // GPU + 117HD plugins are loaded into the panel in every mode (RendererPanelStarter) so they're selectable;
     // flipping one there saves the preference (with a "restart to apply" message), and THIS reads it at launch.
     // base GPU uses the readback present (int[] frames like CPU); 117HD uses the CAEAGLLayer direct present.
     NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
     NSString *pref = [ud stringForKey:@"rendererPref"];
     if (pref == nil && ![ud boolForKey:@"autoGpuFailed"]) {
-        // First run on a fresh install with no prior GPU failure: optimistically promote to the best renderer this
-        // hardware supports (parity with Android's probeGpuCaps auto-promote). The boot crash-cookie (P1-21)
-        // self-heals a bad promotion; autoGpuFailed latches re-promotion off once a promoted boot has failed.
+        // First run on a fresh install with no prior GPU failure: optimistically promote to base GPU if the hardware
+        // can run it (GLRecon says why not 117HD). The boot crash-cookie (P1-21) self-heals a bad promotion;
+        // autoGpuFailed latches re-promotion off once a promoted boot has failed.
         pref = [GLRecon recommendedRendererTier];
         [ud setObject:pref forKey:@"rendererPref"];
         [self appendLine:[NSString stringWithFormat:@"[shell] auto-GPU: first-run caps probe -> default renderer %@", pref]];
@@ -5905,21 +5910,86 @@ static const CFTimeInterval kKeepAwakeGrace = 10.0;
     return -1;
 }
 
-// PERF-MEMORY-THERMAL-01: one governor evaluation (see the property block for the full contract). Called
-// ~0.5 Hz from onDisplayTick on 117HD boots only. Cheap while waiting (one early-out or one JSON parse);
-// after the baseline is captured it's an enum compare + at most one bridge write per thermal transition.
-- (void)thermalGovernorTick {
+#if TARGET_OS_SIMULATOR
+// The simulator's phone is always cool and never in Low Power Mode. The "heat" driver command stands in for those
+// readings, so ios/dev-tools/diagnostics/sim-heat-check.py can run the steps; negative means use the real reading.
+static int simHeatThermal = -1;
+static int simHeatLowPower = -1;
+#endif
+
+// One look at the phone: sets the limits its heat calls for, and leaves a reading for Share logs. See the property
+// block for the contract. Cheap: a frame-counter read and an enum compare, plus a bridge write on a change.
+- (void)heatTick {
+    NSProcessInfo *pi = [NSProcessInfo processInfo];
+    NSInteger thermal = pi.thermalState;
+    BOOL lowPower = pi.lowPowerModeEnabled;
+#if TARGET_OS_SIMULATOR
+    if (simHeatThermal >= 0)
+        thermal = simHeatThermal;
+    if (simHeatLowPower >= 0)
+        lowPower = simHeatLowPower > 0;
+#endif
+    UIDevice *device = [UIDevice currentDevice];
+    if (!self.heatPolicy) {
+        self.heatPolicy = [[RMHeatPolicy alloc] init];
+        device.batteryMonitoringEnabled = YES;
+    }
+    CFTimeInterval now = CACurrentMediaTime();
+    RMHeatLimit limit = [self.heatPolicy limitForThermalState:thermal lowPower:lowPower at:now];
+    if (limit.fps != self.heatFpsLimit && [JVMLauncher setHeatFpsCap:limit.fps]) {
+        [self appendLine:[NSString stringWithFormat:@"[heat] thermal state=%ld lowPower=%d -> frame-rate limit %d->%d",
+                                                    (long)thermal, (int)lowPower, self.heatFpsLimit, limit.fps]];
+        self.heatFpsLimit = limit.fps;
+    }
+    // A backgrounded app may not touch the GPU, and 117HD does to change its scale. The step waits for the foreground.
+    if (self.pendingRouteCZone && !self.appBackgrounded)
+        [self heatApplyScaleLimit:limit.scalePercent thermal:thermal];
+
+    // Whichever counter moved: the engine's, or the frames handed to the screen, because 117HD's direct present never
+    // bumps the engine's, and before the world loads it is the engine that draws.
+    long seq = MAX(self.heatEngineFrames, (long)[JVMLauncher renderedFrameSeq]); // -1 when the bridge can't say
+    long presents = [RouteCBridge presentedFrameCount];
+    long frames = MAX(seq - self.heatEngineFrames, presents - self.heatPresentedFrames);
+    self.heatEngineFrames = seq;
+    self.heatPresentedFrames = presents;
+    RMHeatReading reading = {
+        .thermalState = thermal,
+        .lowPower = lowPower,
+        .background = self.appBackgrounded,
+        .frames = (int)frames,
+        .batteryState = (int)device.batteryState,
+        .batteryLevel = device.batteryLevel,
+        .fpsLimit = self.heatFpsLimit,
+        .scalePercent = self.pendingRouteCZone ? MAX(0, self.thermalAppliedScale) : 0,
+        .baselineScale = self.pendingRouteCZone ? MAX(0, self.thermalBaselineScale) : 0,
+    };
+    [RMHeatLog.shared addReading:reading at:now];
+}
+
+// Queues sceneResolutionScale and notes the write's id. NO if the bridge didn't take it.
+- (BOOL)heatWriteScale:(int)scale {
+    NSString *ack = [JVMLauncher mobileSetConfigGroup:@"hd"
+                                                  key:@"sceneResolutionScale"
+                                                value:[NSString stringWithFormat:@"%d", scale]];
+    NSDictionary *d = ack.length ? parseBridgeJSON(ack, "ViewController.heatWriteScale") : nil;
+    if (![d isKindOfClass:[NSDictionary class]] || ![d[@"ok"] boolValue])
+        return NO;
+    self.thermalWriteId = [d[@"writeId"] longLongValue];
+    return YES;
+}
+
+// 117HD's half of a heat limit: holds sceneResolutionScale to `limitPercent` (0 for no limit) and never above the
+// player's own value. Cheap while waiting (one early-out or one JSON parse); after the baseline is captured it's a
+// compare plus at most one bridge write per change.
+- (void)heatApplyScaleLimit:(int)limitPercent thermal:(NSInteger)thermal {
     NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
     if (self.thermalBaselineScale <= 0) {
         // Self-heal a leaked throttle first (a prior session killed mid-throttle never restored — the
         // persisted config still holds the stepped-down value). The marker records the TRUE baseline.
         int leaked = (int)[ud integerForKey:@"thermalBaselineScale"];
         if (leaked > 0) {
-            if ([JVMLauncher mobileSetConfigGroup:@"hd"
-                                              key:@"sceneResolutionScale"
-                                            value:[NSString stringWithFormat:@"%d", leaked]] == nil) {
+            if (![self heatWriteScale:leaked])
                 return; // bridge not up yet — retry next tick, keep the marker
-            }
             self.thermalBaselineScale = leaked;
             self.thermalAppliedScale = leaked;
             [ud removeObjectForKey:@"thermalBaselineScale"];
@@ -5935,22 +6005,33 @@ static const CFTimeInterval kKeepAwakeGrace = 10.0;
                                            @"[shell] thermal governor armed (117HD) — baseline sceneResolutionScale=%d", live]];
         }
     }
-    // Pressure -> scale: nominal/fair keep the baseline; serious and critical cap progressively lower
-    // (never above the baseline, so a low-res user config is honoured). Same steps as Android (65 / 50).
-    NSProcessInfoThermalState st = [NSProcessInfo processInfo].thermalState;
+    // Never above the baseline, so a low-res user config is honoured.
     int baseline = self.thermalBaselineScale;
-    int target = baseline;
-    if (st == NSProcessInfoThermalStateCritical)
-        target = MIN(baseline, 50);
-    else if (st == NSProcessInfoThermalStateSerious)
-        target = MIN(baseline, 65);
+    int target = limitPercent > 0 ? MIN(baseline, limitPercent) : baseline;
     if (target == self.thermalAppliedScale)
         return;
-    if ([JVMLauncher mobileSetConfigGroup:@"hd"
-                                      key:@"sceneResolutionScale"
-                                    value:[NSString stringWithFormat:@"%d", target]] == nil) {
-        return; // write didn't take — leave appliedScale unchanged so the next tick retries
+    // About to write, so first see if the player has moved the setting since the last write: theirs is the new
+    // baseline, or cooling down would put the old value back. Bridge writes queue on the client thread, so until the
+    // last one has landed a different value is only that write still waiting, and adopting it could make a throttle
+    // permanent. The thread can stall for minutes in a scene load or a shader compile, so a timer can't stand in.
+    if ([JVMLauncher mobileProcessedWriteId] >= self.thermalWriteId) {
+        int live = [self thermalReadLiveScale];
+        if (live <= 0)
+            return; // config not readable: retry next tick
+        if (live != self.thermalAppliedScale) {
+            [self appendLine:[NSString stringWithFormat:@"[shell] thermal: player set sceneResolutionScale=%d (was %d)",
+                                                        live, self.thermalAppliedScale]];
+            baseline = live;
+            self.thermalBaselineScale = live;
+            self.thermalAppliedScale = live;
+            [ud removeObjectForKey:@"thermalBaselineScale"];
+            target = limitPercent > 0 ? MIN(live, limitPercent) : live;
+            if (target == live)
+                return;
+        }
     }
+    if (![self heatWriteScale:target])
+        return; // write didn't take — leave appliedScale unchanged so the next tick retries
     int prev = self.thermalAppliedScale;
     self.thermalAppliedScale = target;
     if (target < baseline)
@@ -5958,7 +6039,7 @@ static const CFTimeInterval kKeepAwakeGrace = 10.0;
     else
         [ud removeObjectForKey:@"thermalBaselineScale"];
     [self appendLine:[NSString stringWithFormat:
-                                   @"[shell] thermal state=%ld -> sceneResolutionScale %d->%d (baseline=%d)", (long)st, prev, target, baseline]];
+                                   @"[shell] thermal state=%ld -> sceneResolutionScale %d->%d (baseline=%d)", (long)thermal, prev, target, baseline]];
 }
 
 - (void)updateChrome {
@@ -7540,9 +7621,9 @@ static CGRect mapRectFromArr(NSArray *a) {
         [self refreshDevDiagnostics]; // developer-mode readout (~2 Hz; no-op while the panel is hidden)
     }
 
-    // PERF-MEMORY-THERMAL-01: thermal governor, 117HD boots only (~0.5 Hz; see thermalGovernorTick).
-    if (self.pendingRouteCZone && self.framesShown % 120 == 0) {
-        [self thermalGovernorTick];
+    // PERF-MEMORY-THERMAL-01: every second or two, on every renderer (see heatTick).
+    if (self.framesShown % 120 == 0) {
+        [self heatTick];
     }
 
     // W3 A3: refresh the enlarged native chat tab buttons (~10 Hz). Self-gates on chrome toggle + layout; runs
@@ -7953,6 +8034,10 @@ static CGRect mapRectFromArr(NSArray *a) {
     // suspension is a possible jetsam → relaunch + StikDebug re-attach, accepted for a dead session.
     static const CFTimeInterval kBgIdleStopSeconds = 600.0;
     self.bgPumpTicks++;
+    // The display tick that drives heatTick stops with the app, and a phone in a pocket can still get hot.
+    if (self.appBackgrounded && self.bgPumpTicks % 75 == 0) {
+        [self heatTick];
+    }
     if (self.bgPumpTicks % 75 == 0 && !self.pipController.isPictureInPictureActive) {
         NSString *snap = [JVMLauncher chromeSnapshot];
         NSDictionary *d = snap.length ? parseBridgeJSON(snap, "ViewController.bgIdleGate") : nil;
@@ -9949,7 +10034,9 @@ static CGRect mapRectFromArr(NSArray *a) {
 //              first saves what it changes to screen-restore.json;
 //   restore    puts that back. The next simulator launch does too, if a sweep died before it got there;
 //   report     writes the "Share logs" report (RMDiagnostics reportText) to Documents/screen-report.txt, for
-//              ios/dev-tools/diagnostics/sim-report-check.py.
+//              ios/dev-tools/diagnostics/sim-report-check.py and sim-heat-check.py.
+//   heat       stands in for the phone's thermal state and Low Power Mode, for sim-heat-check.py.
+//   hd-scale   moves 117HD's resolution setting the way its slider does, likewise.
 
 static NSString *simScreenSeq;    // the last command's seq
 static NSString *simScreenOpened; // "<seq> <screen>" opened and not yet reported ready
@@ -10027,6 +10114,21 @@ static const CFTimeInterval kSimConfirmTimeout = 15.0;
             [RMGameSettings setAutoRotate:NO];
         }
         [RMGameSettings applyOrientationToWindow:self.view.window];
+        [self appendLine:[NSString stringWithFormat:@"[screen] ready %@ %@", seq, name]];
+        return;
+    }
+    // "heat <thermal> [<lowPower>]": stand in for the phone's readings (see simHeatThermal): a thermal state from 0 to
+    // 3 and 0 or 1 for Low Power Mode. -1, or leaving Low Power Mode off the line, uses the real reading.
+    if ([name hasPrefix:@"heat "]) {
+        NSArray<NSString *> *parts = [name componentsSeparatedByString:@" "];
+        simHeatThermal = parts[1].intValue;
+        simHeatLowPower = parts.count > 2 ? parts[2].intValue : -1;
+        [self appendLine:[NSString stringWithFormat:@"[screen] ready %@ %@", seq, name]];
+        return;
+    }
+    // "hd-scale <percent>": move 117HD's resolution setting the way its slider does.
+    if ([name hasPrefix:@"hd-scale "]) {
+        [JVMLauncher mobileSetConfigGroup:@"hd" key:@"sceneResolutionScale" value:[name substringFromIndex:9]];
         [self appendLine:[NSString stringWithFormat:@"[screen] ready %@ %@", seq, name]];
         return;
     }

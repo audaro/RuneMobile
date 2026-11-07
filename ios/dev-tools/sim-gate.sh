@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # sim-gate.sh — the iOS Simulator gate: build once, run every simulator check, give one GREEN/RED verdict.
 #
-#   ios/dev-tools/sim-gate.sh                         # build + install, then every check (~10 min, build current)
+#   ios/dev-tools/sim-gate.sh                         # build + install, then every check (~17 min, build current)
 #   ios/dev-tools/sim-gate.sh --jars                  # restage the jars first (after a Java change)
 #   ios/dev-tools/sim-gate.sh --no-build              # reinstall the last simulator build instead of building
 #   ios/dev-tools/sim-gate.sh --skip sweep            # leave checks out (comma list of census, screens, sweep,
@@ -12,6 +12,7 @@
 # failed build or install does.
 #   0. redaction         diagnostics/test-redaction.sh: the "Share logs" redaction (RMRedact.m, built for the
 #                        Mac) against tools/diagnostics/redaction-cases.txt, the cases Android's RedactTest checks
+#      heat policy       diagnostics/test-heat.sh: the heat limits and the Share logs readings (RMHeat.m, on the Mac)
 #   1. build + install   ./run-sim.sh --no-launch
 #   2. census            bridge-census/run-census-sim.sh: every JNI lookup the native code makes resolves
 #   3. screens           sim-screens/sim-screens.py: the native screens match their goldens
@@ -20,6 +21,8 @@
 #   5. renderers         sim-gate/boot-renderer.py per renderer: the client reaches LOGIN_SCREEN on the renderer
 #                        it was asked for (not the crash cookie's CPU fallback) and is still running 15 s later
 #                        (117hd also checks a player's launch: 117HD off, the login screen's picture still moving)
+#      heat              diagnostics/sim-heat-check.py: the frame rate falls under Low Power Mode and at critical on
+#                        each renderer, the limit comes off after a calm minute, and a new install picks base GPU
 #   6. log scan          tools/log-scan/log-scan.py over every launch's jvm-stdio.log and hello-shell.log: no line
 #                        that isn't on the known-noise list, and no shader error at all (the list can't excuse one)
 # Every launch is logged out (-RMSkipLogin), so the gate never logs into the game, whatever session the simulator
@@ -145,6 +148,14 @@ else
   record redaction FAIL "$(tail -1 <<<"$out")"
 fi
 
+log "Heat limits"
+if out="$(bash ios/dev-tools/diagnostics/test-heat.sh 2>&1)"; then
+  record heat-policy PASS "$(tail -1 <<<"$out")"
+else
+  printf '%s\n' "$out" | tail -12
+  record heat-policy FAIL "$(tail -1 <<<"$out")"
+fi
+
 # 1) Build + install. Everything after this uses the installed app.
 flags=(--no-launch)
 [ "$BUILD" = yes ] || flags+=(--no-build)
@@ -239,6 +250,25 @@ else
       keep_logs "renderer-$r" "$since" no
     fi
   done
+fi
+
+# 5b) The heat limits: the frame rate actually falls on each renderer, and a new install picks base GPU.
+if skipped renderers; then
+  record heat SKIP "--skip renderers"
+else
+  log "Heat limits on $RENDERERS"
+  since="$(date +%s)"
+  # shellcheck disable=SC2086 # one word per renderer
+  "$PY" ios/dev-tools/diagnostics/sim-heat-check.py --no-build $RENDERERS > "$RUN/heat.log" 2>&1
+  rc=$?
+  cat "$RUN/heat.log"
+  if [ "$rc" = 0 ]; then
+    record heat PASS "$(tail -1 "$RUN/heat.log")"
+    keep_logs heat "$since" yes
+  else
+    record heat FAIL "$(grep -m1 -E '^  - |^SIM_HEAT_RED ' "$RUN/heat.log" | cut -c1-200)"
+    keep_logs heat "$since" no
+  fi
 fi
 
 # 6) Log scan over every launch kept above.

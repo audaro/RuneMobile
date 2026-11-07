@@ -18,7 +18,7 @@ the change needs: a failure low on the ladder is quicker to read and cheaper to 
 | Bridge censuses | Does every JNI lookup each port makes resolve in the jars it ships? | Bridge or native lookup changes | Under a minute (Android), ~20 s plus a build (iOS) | `*_BRIDGE_CENSUS_GREEN` | `run-census-desktop.sh`, `run-census-sim.sh` |
 | Desktop headless harness | Does real RuneLite boot, log in and draw the HUD correctly with the bridge in it? | Behaviour changes in the bridge, overlays, HUD | 45 s to ~3 min | `VERDICT: GREEN`, exit 0 | `ios/dev-tools/headless/run-*.sh` |
 | Harness MCP server | The same harnesses, callable as tools with parsed results | Whenever you drive the harnesses repeatedly | As the harness | JSON per tool | `tools/mcp/harness_server.py` |
-| iOS Simulator | Do the native screens, plugin panels and each renderer still work? | iOS native UI, release, upstream merge | ~10 s to ~10 min | `SIM_GATE_GREEN` and friends | `ios/dev-tools/sim-gate.sh` |
+| iOS Simulator | Do the native screens, plugin panels and each renderer still work? | iOS native UI, release, upstream merge | ~10 s to ~17 min | `SIM_GATE_GREEN` and friends | `ios/dev-tools/sim-gate.sh` |
 | Shader matrix | Do the 117 HD shaders compile for each port's GL after rewriting? | Shader, RLHD or downport changes | Minutes | `SHADER_MATRIX_GREEN` | `tools/shader-matrix/run-matrix.sh ios` |
 | Log scan | Did a launch log anything not on the known-noise list? | After any device or simulator launch you want to trust | Seconds | `LOG_SCAN_GREEN` | `tools/log-scan/log-scan.py --sim LOG` |
 | Port drift | Where do the two ports' JVM options, bridge bindings and RLHD overrides differ? | Before porting a fix across, after a merge | Seconds | A report, exit 0 | `tools/port-drift/port-drift.py` |
@@ -323,14 +323,15 @@ hidden (Notes) was found to get a settings screen holding nothing but "Reset all
 ### The simulator gate
 
 ```sh
-ios/dev-tools/sim-gate.sh                       # expect VERDICT: SIM_GATE_GREEN, ~10 min
+ios/dev-tools/sim-gate.sh                       # expect VERDICT: SIM_GATE_GREEN, ~17 min
 ios/dev-tools/sim-gate.sh --jars                # restage the jars first
 ios/dev-tools/sim-gate.sh --skip sweep          # skip any of: census,screens,sweep,renderers
 RENDERERS="cpu gpu" ios/dev-tools/sim-gate.sh
 ```
 
 It builds once, then runs the census, the screens, the sweep, a boot of each renderer to the login screen
-(surviving `DWELL` seconds there), and the log scan over every launch, which must find no shader errors. Every
+(surviving `DWELL` seconds there), the heat limits on each renderer (`sim-heat-check.py`), and the log scan over
+every launch, which must find no shader errors. Every
 launch is logged out. It exits 0 on GREEN, 1 on RED and 2 on bad arguments, and keeps every step's log under
 `build/sim-gate/<stamp>/`. Run it before a release, after an upstream merge, and after any shader or renderer
 change. See its [README](../../ios/dev-tools/sim-gate/README.md).

@@ -102,6 +102,7 @@ static jmethodID gMuiListPanels = NULL;   // listPanels()Ljava/lang/String;
 static jmethodID gMuiNotesAvail = NULL;   // notesAvailable()Z  (native Notes panel)
 static jmethodID gMuiGameSettings = NULL; // gameSettings()Ljava/lang/String;  (native Game settings)
 static jmethodID gMuiSetFpsCap = NULL;    // setFpsCap(I)Ljava/lang/String;
+static jmethodID gMuiSetHeatFpsCap = NULL; // setHeatFpsCap(I)Ljava/lang/String;
 static jmethodID gMuiSetIdleLogout = NULL; // setIdleLogoutMinutes(I)Ljava/lang/String;
 static jmethodID gMuiNotesGet = NULL;     // notesGet()Ljava/lang/String;
 static jmethodID gMuiNotesSet = NULL;     // notesSet(Ljava/lang/String;)Ljava/lang/String;
@@ -760,6 +761,11 @@ static BOOL ensureMui(void) {
     if ((*env)->ExceptionCheck(env)) {
         (*env)->ExceptionClear(env);
         gMuiSetFpsCap = NULL;
+    }
+    gMuiSetHeatFpsCap = (*env)->GetStaticMethodID(env, global, "setHeatFpsCap", "(I)Ljava/lang/String;");
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        gMuiSetHeatFpsCap = NULL;
     }
     gMuiSetIdleLogout = (*env)->GetStaticMethodID(env, global, "setIdleLogoutMinutes", "(I)Ljava/lang/String;");
     if ((*env)->ExceptionCheck(env)) {
@@ -3939,6 +3945,14 @@ static BOOL pipFeedMarkerSaysMain(void) {
         return nil;
     JNIEnv *env = gMainEnv;
     return jstringToNS(env, (jstring)(*env)->CallStaticObjectMethod(env, gMuiClass, gMuiSetFpsCap, (jint)fps));
+}
+
++ (BOOL)setHeatFpsCap:(int)fps {
+    if (!ensureMui() || !gMuiSetHeatFpsCap)
+        return NO;
+    JNIEnv *env = gMainEnv;
+    NSString *ack = jstringToNS(env, (jstring)(*env)->CallStaticObjectMethod(env, gMuiClass, gMuiSetHeatFpsCap, (jint)fps));
+    return [ack hasPrefix:@"{\"ok\":true"];
 }
 
 + (NSString *)setIdleLogoutMinutes:(int)minutes {

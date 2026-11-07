@@ -36,7 +36,7 @@ jar on the class path and their GL context created before the first frame, and t
 |---|---|---|
 | Where it is saved | `NSUserDefaults` key `rendererPref` | `SharedPreferences` file `renderer`, key `mode` |
 | Values | `cpu`, `gpu`, `117hd` | `cpu`, `gpu`, `117hd` |
-| Default | `cpu`, unless the first-run probe promotes it | the same |
+| Default | what the first-run probe picks, else `cpu` | the same |
 | Where the user picks | the GPU or 117 HD row in the plugin panel | the same |
 
 Toggling one of those rows saves the preference and shows "restart to apply". Tapping the row that is already
@@ -50,12 +50,13 @@ next time, and a failed boot (below) is reverted before the JVM starts. On iOS, 
 
 ### First-run promotion
 
-On a fresh install, with no saved preference and no earlier failure, each port probes the GPU once and saves the
-best tier it supports.
+On a fresh install, with no saved preference and no earlier failure, each port probes the GPU once and saves what
+it picks. The choice is saved like a player's own, so a change to it reaches new installs only.
 
-- **iOS**: `GLRecon recommendedRendererTier` (`ios/app/RuneMobile/GLRecon.m`). A device in Metal GPU family Apple7
-  or newer whose EAGL context can create an ES 3 offscreen framebuffer, render into it and read it back gets
-  `117hd`. A device that only passes the framebuffer check gets `gpu`; anything else gets `cpu`.
+- **iOS**: `GLRecon recommendedRendererTier` (`ios/app/RuneMobile/GLRecon.m`). A device whose EAGL context can create
+  an ES 3 offscreen framebuffer, render into it and read it back gets `gpu`; anything else gets `cpu`. Recent iPhones
+  can all run 117 HD, but it is left for the player to choose: it works the GPU hard enough that a phone left on it
+  gets hot (see [Heat](#heat)).
 - **Android**: `probeGpuCaps()` in `MainActivity.kt` creates an EGL pbuffer context, trying ES 3.2, then 3.1, then
   3.0. ES 3.1 or newer with compute shaders gives `117hd`; ES 3.0 with multisampling gives `gpu`; anything else
   gives `cpu`. It also records `autoDecided` so a later failure knows the choice was automatic.
@@ -340,11 +341,36 @@ programs compile lazily, many only in the world, and a failed compile is logged 
 for shader errors in the log (`tools/log-scan/` counts them separately and never lets them be excused as noise) and
 run the shader matrix.
 
-117 HD also has a thermal governor on both ports (`ThermalGovernor.kt` on Android, the `thermal*` methods in
+### Heat
+
+117 HD has a thermal governor on both ports (`ThermalGovernor.kt` on Android, `heatApplyScaleLimit` in
 `ViewController.m` on iOS): under sustained thermal pressure it lowers `sceneResolutionScale` and restores the
 user's own value once the phone cools. It only acts while 117 HD is the live renderer, and while throttled it
 records the true baseline (a marker file on Android, a user-defaults key on iOS) so a session killed mid-throttle
-cannot make the throttled value permanent.
+cannot make the throttled value permanent. On iOS, a player who moves the setting sets a new baseline: the governor
+compares the live value before each write, but only once its own last write has landed (`getProcessedWriteId`),
+because bridge writes queue on the client thread, and that thread can stall for minutes.
+
+iOS also limits the frame rate, on every renderer. `RMHeatPolicy` (`ios/app/RuneMobile/RMHeat.m`) maps the phone's
+state to limits, and `heatTick` applies them. The values are starting values, not measured ones:
+
+| State | Frame rate | 117 HD scale |
+|---|---|---|
+| nominal | none | none |
+| fair | 40 | none |
+| serious | 30 | 65 |
+| critical | 20 | 50 |
+| Low Power Mode | 30 at most | none |
+
+A limit comes on at the first reading that calls for it and lifts one step per 60 calm seconds; Low Power Mode comes
+and goes with its switch. The frame limit is `HeatFrameCap`, reached through `MobileUiBridge.setHeatFpsCap`. It does
+not use FPS Control's setting, which is saved to the profile and can sync: a session that died hot would leave its
+limit behind. It sleeps on the draw path like FPS Control, so game ticks and audio keep their time.
+
+Why the scale stays behind the frame rate: it is a saved setting that changes the picture, and it only exists on one
+renderer. Why 117 HD isn't the iOS default: on a 17 Pro Max in June 2026, base GPU spent 6-8 ms of GPU time a frame
+and 117 HD about 55 ms. Nobody has measured heat on any iPhone for either. Share logs carries a Heat section (a line
+a minute of thermal state, frame rate, limits and battery), so the first real numbers can come from a player's report.
 
 ## The Android GL bridge lags iOS
 

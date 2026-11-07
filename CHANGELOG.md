@@ -19,6 +19,13 @@ as "What's new".
   their own sounds. They mix with anything else you're playing, and they stop when you leave the app and come back
   when you return. Volumes are in the game's own settings, and Game settings > Sound > Game sound turns it all off.
   On iPhone the game also plays with the Ring/Silent switch on silent, so use Game sound to quiet it.
+- **iPhone: the game eases off when the phone gets hot.** It lowers the frame rate as the phone warms up, on every
+  renderer, and goes back up once it has cooled. Low Power Mode holds it to 30 fps.
+- **iPhone: Share logs shows heat and battery readings,** a line a minute, to help with reports of a hot phone.
+
+### Changed
+- **iPhone: new installs start on GPU instead of 117 HD.** It runs much lighter on the phone, and 117 HD is still in
+  the plugins panel. If you're already set up, nothing changes, and you can switch by hand.
 
 ## [0.8.0] - 2026-11-05
 

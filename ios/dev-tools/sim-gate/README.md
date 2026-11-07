@@ -11,8 +11,8 @@ ios/dev-tools/sim-gate.sh --skip sweep           # leave checks out: census, scr
 RENDERERS="gpu 117hd" ios/dev-tools/sim-gate.sh  # boot only these renderers (default cpu gpu 117hd)
 ```
 
-It ends with `VERDICT: SIM_GATE_GREEN` (exit 0) or `_RED` (exit 1). With a current build it takes about ten
-minutes, six or seven of them the plugin sweep (`--skip sweep` leaves it out). A check that fails doesn't stop the run, so one run shows everything that is wrong; only a failed build
+It ends with `VERDICT: SIM_GATE_GREEN` (exit 0) or `_RED` (exit 1). With a current build it takes about seventeen
+minutes, six or seven of them the plugin sweep and about seven the heat check (`--skip sweep` leaves it out). A check that fails doesn't stop the run, so one run shows everything that is wrong; only a failed build
 or install stops it early.
 
 ## The checks
@@ -31,7 +31,13 @@ or install stops it early.
    cookie's CPU fallback, and then its own survival proof: the GPU and 117HD plugins force-disabled for CPU,
    `GPU first frame` for GPU, `117HD first GL present` for 117HD. A crash cookie left by an earlier GPU launch
    that was killed before its first frame is removed first, and the step says so.
-6. **log scan**: `tools/log-scan/log-scan.py` over the `jvm-stdio.log` and `hello-shell.log` of every launch
+6. **heat**: `../diagnostics/sim-heat-check.py`, skipped with the renderers. The driver's `heat` command stands in
+   for the phone's thermal state and Low Power Mode, and each renderer has to show the limit in its Share logs
+   report and fall under it (`SIM_HEAT_GREEN`). A renderer that doesn't run faster than the limits fails, because
+   the check would prove nothing. On 117 HD it also moves the resolution setting as a player would, before and during
+   a throttle, and the player's value has to be the one that comes back. Then a launch with no saved renderer has to
+   pick base GPU. About seven minutes in all.
+7. **log scan**: `tools/log-scan/log-scan.py` over the `jvm-stdio.log` and `hello-shell.log` of every launch
    above. It fails on any line that isn't on the known-noise list (`tools/log-scan/known-noise.json`), on any
    shader error (the noise list can't excuse those), and when a launch that passed left no logs of its own.
 

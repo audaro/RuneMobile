@@ -1,5 +1,6 @@
 #import "RMDiagnostics.h"
 #import "JVMLauncher.h"
+#import "RMHeat.h"
 #import "RMRedact.h"
 #import <sys/utsname.h>
 
@@ -18,8 +19,8 @@ static const NSTimeInterval kEngineWait = 3.0;
     UIAlertController *note = [UIAlertController
         alertControllerWithTitle:@"Share logs"
                          message:@"This makes a text file to post with your bug report: app and device versions, "
-                                 @"your plugins, and recent log lines. Login tokens, emails and your character "
-                                 @"name are taken out first."
+                                 @"your plugins, heat and battery readings, and recent log lines. Login tokens, "
+                                 @"emails and your character name are taken out first."
                   preferredStyle:UIAlertControllerStyleAlert];
     [note addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [note addAction:[UIAlertAction actionWithTitle:@"Share"
@@ -96,6 +97,9 @@ static const NSTimeInterval kEngineWait = 3.0;
 
     [r appendString:@"\n== Engine ==\n"];
     [r appendString:[self engineTextAddingNames:names]];
+
+    [r appendString:@"\n== Heat ==\n"];
+    [r appendString:[RMHeatLog.shared report]];
 
     NSString *dir = [JVMLauncher appLogDir];
     [r appendString:@"\n== Crash reports ==\n"];

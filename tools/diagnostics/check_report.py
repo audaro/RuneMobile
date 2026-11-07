@@ -11,8 +11,8 @@ import sys
 from pathlib import Path
 
 SECTIONS = {
-    "ios": ["== Engine ==", "== Crash reports ==", "== App log, this launch ==", "== App log, previous launch ==",
-            "== RuneLite client.log =="],
+    "ios": ["== Engine ==", "== Heat ==", "== Crash reports ==", "== App log, this launch ==",
+            "== App log, previous launch ==", "== RuneLite client.log =="],
     "android": ["== Engine ==", "== Recent app exits ==", "== Crash reports ==", "== App log (logcat) ==",
                 "== RuneLite client.log =="],
 }
