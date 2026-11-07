@@ -27,6 +27,11 @@ as "What's new".
 - **iPhone: new installs start on GPU instead of 117 HD.** It runs much lighter on the phone, and 117 HD is still in
   the plugins panel. If you're already set up, nothing changes, and you can switch by hand.
 
+### Fixed
+- **Android: 117 HD no longer stays blurry after the app is closed on a hot phone.** The lowered resolution could
+  stick and replace your own setting. A resolution scale you change while the phone is hot now sticks too. If yours
+  is already stuck low, set it back once in the 117 HD settings.
+
 ## [0.8.0] - 2026-11-05
 
 ### Changed

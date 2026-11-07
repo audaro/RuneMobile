@@ -664,6 +664,18 @@ or touch.** iOS.
   peak of 0 is the game choosing silence; a peak above 0 with `no output` is the output. To test with default volumes
   on desktop, keep the shared cache but not those two files: make `LIVE` a real folder of per-file symlinks.
 
+### A bridge call at launch does nothing
+
+**Check the ack of a bridge call that can run before the JVM is up, and retry it.**
+
+- **Symptom:** a setting that the log says was restored is unchanged. Android's thermal governor logged `recovered a
+  leaked throttle` for every kill mid-throttle, and the player's scale stayed low for good.
+- **Cause:** `onBridge` queues on a thread that's up long before HotSpot, and the native calls return `""` until
+  `MobileUiBridge` publishes. On an emulator HotSpot alone started 10 s after `onCreate`.
+- **What to do:** treat anything but `{"ok":true` as not done. A written config value isn't safe yet either: it waits
+  on the client thread, then in memory until a save, and `flushConfig` saves without waiting for that queue.
+- **In code:** `ThermalScaleKeeper.kt`, `JvmLauncher.configWritesLanded`.
+
 ### Phone frame rate is mostly heat
 
 **Compare frame rates only under the same thermal state.**

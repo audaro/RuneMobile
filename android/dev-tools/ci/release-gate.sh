@@ -19,7 +19,7 @@
 #                                                                  — --contract-only stops after this
 #   1c  shellcheck   1d  ktlint   1e  detekt                       — each fails if the tool is missing
 #   1f  headless bridge unit tests (:client:test --tests net.runelite.client.headless.*)
-#   1g  app unit tests (:app:testDebugUnitTest): the "Share logs" redaction cases
+#   1g  app unit tests (:app:testDebugUnitTest): the "Share logs" redaction cases, the thermal governor's steps
 #   2   :app:assembleRelease (+ verifyNoReleaseSecret / verifyReleaseBootAssets)
 #   2b  signing verification (apksigner certificate fingerprint)  — 2 and 2b are skipped by --skip-build
 #   3   :app:lintRelease

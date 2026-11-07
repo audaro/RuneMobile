@@ -55,7 +55,7 @@ The Kotlin files that matter most:
 | `PluginPanel.kt`, `ConfigScreen.kt`, `PluginHubScreen.kt`, `PanelView.kt`, `PanelReflowScreens.kt`, `XpTrackerScreen.kt`, `QuestWorldScreens.kt`, `InfoBoxScreen.kt` | Plugin list, config, hub, rendered side panels and the native panel screens. |
 | `OverlayEditView.kt` | Overlay edit mode (move RuneLite overlays, the chat and the minimap). |
 | `KeepaliveService.kt` | Foreground service that keeps a logged-in session alive in the background. |
-| `ThermalGovernor.kt` | Lowers 117 HD's scene resolution under thermal pressure and restores it when the phone cools. |
+| `ThermalGovernor.kt` | Feeds thermal status to `ThermalScaleKeeper.kt`, which lowers 117 HD's scene resolution under thermal pressure and restores it when the phone cools. |
 | `SafeInsets.kt` | Window insets trimmed to the system bars. |
 
 `cpp/CMakeLists.txt` builds two libraries, both linked with 16 KB page alignment:
@@ -355,7 +355,10 @@ trusting single screenshots.
 **ThermalGovernor.** While 117 HD is the live renderer, a thermal-status listener steps its
 `sceneResolutionScale` down at moderate thermal status and above, and restores the saved value when the phone
 cools. A marker file records the real value while throttled, so a session killed mid-throttle can't make the
-lowered value the next baseline.
+lowered value the next baseline, and the marker goes only once that value is on disk (see
+[Heat](renderers.md#heat)). The governor arms before the JVM is up and is otherwise woken only by a status change,
+so it runs again every 2 s while it has more to do, and for as long as it is throttling.
+`android/dev-tools/diagnostics/heat-check.sh` checks all of this on an emulator.
 
 ## Settings and live config
 

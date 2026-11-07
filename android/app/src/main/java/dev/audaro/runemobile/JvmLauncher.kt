@@ -856,18 +856,30 @@ object JvmLauncher {
         group: String,
         key: String,
         value: String,
-    ) = nativeSetConfig(group, key, value)
+    ) = noteConfigWrite(nativeSetConfig(group, key, value))
 
     fun processedWriteId() = nativeProcessedWriteId()
 
     fun flushConfig() = nativeFlushConfig()
 
-    fun resetPluginConfig(group: String) = nativeResetPluginConfig(group)
+    fun resetPluginConfig(group: String) = noteConfigWrite(nativeResetPluginConfig(group))
 
     fun resetConfig(
         group: String,
         key: String,
-    ) = nativeResetConfig(group, key)
+    ) = noteConfigWrite(nativeResetConfig(group, key))
+
+    // The newest config write queued from here. rl-bridge thread only, like the calls that make them.
+    private var lastConfigWriteId = 0L
+    private val writeIdInAck = Regex("\"writeId\":(\\d+)")
+
+    private fun noteConfigWrite(ack: String): String {
+        writeIdInAck.find(ack)?.let { lastConfigWriteId = it.groupValues[1].toLong() }
+        return ack
+    }
+
+    /** True once every config write queued from here has run on the client thread. False until the bridge is up. */
+    fun configWritesLanded() = processedWriteId() >= lastConfigWriteId
 
     fun notificationDefaults() = nativeNotificationDefaults()
 

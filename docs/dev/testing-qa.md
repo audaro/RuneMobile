@@ -487,6 +487,7 @@ an account that can reach one; a fresh tutorial-island account can't.
 | `tools/perfprobe.sh android\|ios on\|off\|status` | arms the frame and memory probes for the next launch; `marker NAME VALUE` sets a one-off marker |
 | `android/dev-tools/gpu/fps-measure.sh [-s SERIAL] [-d SECONDS]` | captures fps, frame pacing, GC, thermal and GPU time from logcat; `--from-file LOG` parses a saved log, including the desktop harness's |
 | `ios/dev-tools/residency.py` | summarises why each iOS session ended, from logs pulled off the phone |
+| `android/dev-tools/diagnostics/heat-check.sh [-s SERIAL]` | forces thermal statuses on an emulator and checks the player's 117 HD scale is on disk before the throttle marker goes, through a cool-down, a player's change and a kill; expect `ANDROID_HEAT_GREEN` |
 
 For a desktop frame-rate baseline, run the harness with the probe on and parse its log the same way:
 

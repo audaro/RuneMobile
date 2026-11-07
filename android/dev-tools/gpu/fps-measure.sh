@@ -424,7 +424,7 @@ if [[ -n "$thermal_rows" ]]; then
     }'
 fi
 
-# ThermalGovernor. The arm-time apply logs prev=-1 and sets the scale it already had, so it isn't a change.
+# ThermalGovernor. On older builds the arm-time apply logs prev=-1 and sets the scale it already had, so it isn't a change.
 if [[ -n "$govern" ]]; then
   printf '%s\n' "$govern" | awk -v label="$LABEL" '
     NF==6 {
