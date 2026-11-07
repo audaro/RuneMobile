@@ -229,6 +229,12 @@ state. [`ios/dev-tools/residency.py`](../../ios/dev-tools/residency.py) pulls th
 ended and adds up the causes over many sessions; the ground truth for a jetsam kill is a `JetsamEvent-*.ips` report
 under Settings → Privacy & Security → Analytics & Improvements → Analytics Data.
 
+Those `[memwatch]` lines only exist in a Debug build or with the perf probe armed, so a player's phone keeps a memory
+trail instead: a line a minute of the footprint, the headroom, graphics, media and malloc memory, the Java heap and the
+thread count ([`RMMemoryTrail.h`](../../ios/app/RuneMobile/RMMemoryTrail.h) says what each one covers). Share logs
+carries it in **Memory trail**, kept across the kill, and **Recent sessions** says how the last eight sessions ended.
+The trail's last session may not be the one that wrote the report, so go by its opening line.
+
 ### GC and safepoint logging
 
 Arming the perf probe also runs the VM with `-Xlog:gc,safepoint` to stdout, next to the per-second frame probes:

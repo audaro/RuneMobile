@@ -82,4 +82,8 @@
 // The only clean ending: iOS told us it was terminating. Anything else is a kill we never saw.
 + (void)noteCleanExit;
 
+// How the last `count` ended sessions went, oldest first: one line each, for Share logs. One verdict can't say whether
+// a death is a habit.
++ (NSString *)recentSessions:(NSUInteger)count;
+
 @end

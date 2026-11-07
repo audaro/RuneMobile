@@ -1,7 +1,9 @@
 #import "RMDiagnostics.h"
 #import "JVMLauncher.h"
 #import "RMHeat.h"
+#import "RMMemoryTrail.h"
 #import "RMRedact.h"
+#import "RMResidency.h"
 #import <sys/utsname.h>
 
 // How much of each log goes in. The whole report stays near 1 MB, well under a Discord attachment.
@@ -10,6 +12,8 @@ static const unsigned long long kShellLogTail = 192 * 1024;
 static const unsigned long long kPrevShellLogTail = 96 * 1024;
 static const unsigned long long kCrashReportHead = 96 * 1024;
 static const NSTimeInterval kEngineWait = 3.0;
+// Enough to show whether a death is a habit: a player usually sends the report after the second or third.
+static const NSUInteger kRecentSessions = 8;
 
 @implementation RMDiagnostics
 
@@ -100,6 +104,11 @@ static const NSTimeInterval kEngineWait = 3.0;
 
     [r appendString:@"\n== Heat ==\n"];
     [r appendString:[RMHeatLog.shared report]];
+
+    [r appendString:@"\n== Memory trail ==\n"];
+    [r appendString:RMMemoryTrailReport()];
+    [r appendString:@"\n== Recent sessions ==\n"];
+    [r appendString:[RMResidency recentSessions:kRecentSessions]];
 
     NSString *dir = [JVMLauncher appLogDir];
     [r appendString:@"\n== Crash reports ==\n"];

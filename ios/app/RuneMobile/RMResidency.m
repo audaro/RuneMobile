@@ -259,6 +259,25 @@ static void AppendHistory(NSDictionary *prev, double lived, NSString *klass, NSS
     Persist();
 }
 
++ (NSString *)recentSessions:(NSUInteger)count {
+    NSString *path = HistoryPath();
+    NSString *text = path ? [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL] : nil;
+    NSMutableArray<NSString *> *rows = [NSMutableArray array];
+    for (NSString *line in [text componentsSeparatedByString:@"\n"]) {
+        NSData *json = [line dataUsingEncoding:NSUTF8StringEncoding];
+        NSDictionary *e = line.length ? [NSJSONSerialization JSONObjectWithData:json options:0 error:NULL] : nil;
+        if (![e isKindOfClass:[NSDictionary class]] || ![e[@"started"] isKindOfClass:[NSString class]] ||
+            ![e[@"verdict"] isKindOfClass:[NSString class]])
+            continue;
+        NSString *verdict = [e[@"verdict"] stringByReplacingOccurrencesOfString:@"[residency] previous session " withString:@""];
+        [rows addObject:[NSString stringWithFormat:@"%@ %@\n", e[@"started"], verdict]];
+    }
+    if (!rows.count)
+        return @"(none yet)\n";
+    NSUInteger keep = MIN(count, rows.count);
+    return [[rows subarrayWithRange:NSMakeRange(rows.count - keep, keep)] componentsJoinedByString:@""];
+}
+
 + (NSString *)noteLaunchAndVerdict {
     NSString *path = RecordPath();
     NSDictionary *prev =

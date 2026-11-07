@@ -1,6 +1,7 @@
 #import "JVMLauncher.h"
 #import "RMGameAudio.h"
 #import "RMGameSettings.h"
+#import "RMMemoryTrail.h"
 #import <dlfcn.h>
 #import <signal.h>
 #import <pthread.h>
@@ -1507,11 +1508,12 @@ static void dumpFaultState(const char *when) {
 }
 
 // Jetsam headroom, footprint, Java heap and thermal state for the whole session, to stderr: the crash-safe
-// jvm-stdio.log fd in Debug, perf-probe.log in a Release build with the perf probe armed (nothing keeps stderr
-// otherwise, so it does not run then). Every 500 ms for the first 30 s, across RuneLite init (the crash window): if
-// a post-login launch is OOM/jetsam-killed, the last line shows avail collapsing toward 0 right before death, the
-// signature that separates a memory kill from a SIGSEGV (exception-port/handler) kill. Every 5 s after that, so a
-// long session's leak or thermal ramp shows as a trend beside the frame-pacing lines.
+// jvm-stdio.log fd in Debug, perf-probe.log in a Release build with the perf probe armed. Nothing keeps stderr
+// otherwise, so a plain Release build prints nothing and only feeds the memory trail (RMMemoryTrail.h). Every 500 ms
+// for the first 30 s, across RuneLite init (the crash window): if a post-login launch is OOM/jetsam-killed, the last
+// line shows avail collapsing toward 0 right before death, the signature that separates a memory kill from a SIGSEGV
+// (exception-port/handler) kill. Every 5 s after that, so a long session's leak or thermal ramp shows as a trend beside
+// the frame-pacing lines.
 // heapMB is Java used/committed, the same pair as [framebins], once the VM is published. The thread attaches as a
 // daemon; that is safe because a published VM is never destroyed (jvm-main parks for the life of the process).
 static const char *memwatchThermal(void) {
@@ -1527,10 +1529,10 @@ static const char *memwatchThermal(void) {
     }
     return "unknown";
 }
-static void *memWatchdog(void *unused) {
-    (void)unused;
+static void *memWatchdog(void *printing) {
     pthread_setname_np("mem-watchdog");
     const uint64_t t0 = clock_gettime_nsec_np(CLOCK_MONOTONIC);
+    RMMemoryTrailStart();
     JNIEnv *env = NULL;
     jclass runtimeClass = NULL;
     jmethodID getRuntime = NULL, totalMemory = NULL, freeMemory = NULL;
@@ -1564,27 +1566,35 @@ static void *memWatchdog(void *unused) {
                 }
             }
             char heap[32] = "-";
+            long heapUsedMB = -1, heapCommittedMB = -1;
             if (getRuntime && totalMemory && freeMemory) {
                 jobject rt = (*env)->CallStaticObjectMethod(env, runtimeClass, getRuntime);
                 if (rt) {
                     jlong total = (*env)->CallLongMethod(env, rt, totalMemory);
                     jlong freeBytes = (*env)->CallLongMethod(env, rt, freeMemory);
-                    snprintf(heap, sizeof heap, "%lld/%lld", (long long)((total - freeBytes) >> 20), (long long)(total >> 20));
+                    heapUsedMB = (long)((total - freeBytes) >> 20);
+                    heapCommittedMB = (long)(total >> 20);
+                    snprintf(heap, sizeof heap, "%ld/%ld", heapUsedMB, heapCommittedMB);
                     (*env)->DeleteLocalRef(env, rt);
                 }
                 if ((*env)->ExceptionCheck(env))
                     (*env)->ExceptionClear(env);
             }
             double t = (clock_gettime_nsec_np(CLOCK_MONOTONIC) - t0) / 1e9;
-            fprintf(stderr, "[memwatch t=%4.1fs] avail=%.1fMB footprint=%.1fMB heapMB=%s thermal=%s\n", t,
-                    avail / 1048576.0, fp / 1048576.0, heap, memwatchThermal());
+            if (printing)
+                fprintf(stderr, "[memwatch t=%4.1fs] avail=%.1fMB footprint=%.1fMB heapMB=%s thermal=%s\n", t,
+                        avail / 1048576.0, fp / 1048576.0, heap, memwatchThermal());
+            RMMemoryTrailSample(heapUsedMB, heapCommittedMB);
         }
-        usleep(i < 60 ? 500000 : 5000000);
+        const useconds_t printPause = i < 60 ? 500000 : 5000000;
+        usleep(printing ? printPause : 60000000);
     }
     return NULL;
 }
-static void startMemWatchdog(void) {
-    pthread_t t; if (pthread_create(&t, NULL, memWatchdog, NULL) == 0) pthread_detach(t);
+static void startMemWatchdog(BOOL printing) {
+    pthread_t t;
+    if (pthread_create(&t, NULL, memWatchdog, printing ? (void *)1 : NULL) == 0)
+        pthread_detach(t);
 }
 
 // Same-session login fix: if WebKit (resident from the login web view) displaced the StikDebug debugger on
@@ -2533,10 +2543,9 @@ static void RMEnsureResizableDisplayMode(NSString *rlHome, JVMLogSink log) {
 
     dumpFaultState("post-clear");   // STRIP AFTER DIAGNOSIS — did the clears stick?
 #if DEBUG
-    startMemWatchdog(); // session-long memory/heap/thermal sampler (see memWatchdog)
+    startMemWatchdog(YES); // session-long memory/heap/thermal sampler (see memWatchdog)
 #else
-    if ([JVMLauncher perfProbeArmed])
-        startMemWatchdog(); // Release keeps stderr only with the perf probe armed
+    startMemWatchdog([JVMLauncher perfProbeArmed]); // Release keeps stderr only with the perf probe armed
 #endif
 
     log(@"[jvm] JNI_CreateJavaVM (HotSpot generates its template interpreter now)…");

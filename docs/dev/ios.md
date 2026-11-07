@@ -56,6 +56,7 @@ The files in `ios/app/RuneMobile/`:
 | `OverlayEditView.m` | Overlay edit mode: drag handles for every movable RuneLite overlay, plus the chat box and minimap cluster. |
 | `JagexLoginViewController.m` | On-device Jagex login in a `WKWebView`; the result is written to `tokens.json`. |
 | `RMGameSettings.m` | The Game settings screen and its `NSUserDefaults` keys (long-press time, camera speed, haptics). |
+| `RMMemoryTrail.m` | Writes a line a minute of what the process's memory is made of, for Share logs. |
 | `RMResidency.m` | Records why the last session ended (clean exit, idle release, suspected jetsam). |
 | `GLRecon.m` | GPU capability probe; `recommendedRendererTier` picks the first-run renderer. |
 | `RMKeyboardDismiss.m` | A Done bar for text fields and search bars, so an empty field can still close the keyboard. |
