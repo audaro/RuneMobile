@@ -3598,15 +3598,17 @@ public final class HudVeneerBridge
 		}
 	}
 
-	/** True if {@code id}'s interface is LOADED — i.e. the dialogue is open. This is the standard RuneLite
-	 *  dialogue-open check (the in-tree dialogue plugins use a plain {@code getWidget(...) != null}); a dialogue
-	 *  group is only resolvable while its dialogue is up. NOTE: deliberately NOT gated on {@code !isHidden()} — a
-	 *  loaded dialogue widget can transiently report hidden, which silently killed detection. */
+	/** True while {@code id}'s interface is OPEN: the widget resolves AND its group is mounted (see
+	 *  {@link #groupMounted}). Loaded is not open. A group stays resolvable after its box has gone, so a
+	 *  loaded-only test kept a closed "inventory too full" message reading as the dialogue on screen: the make-X
+	 *  box that took its place was never offered a tap, every tap on it went to the gone message's continue, and
+	 *  the chat stayed hidden behind a dialogue that was not there. NOTE: deliberately NOT {@code !isHidden()},
+	 *  which walks the chatbox ancestry above the box and reads hidden for a dialogue plainly on screen. */
 	private static boolean widgetShown(Client c, int id)
 	{
 		try
 		{
-			return c.getWidget(id) != null;
+			return c.getWidget(id) != null && groupMounted(c, id >>> 16);
 		}
 		catch (RuntimeException ex)
 		{
@@ -3614,10 +3616,33 @@ public final class HudVeneerBridge
 		}
 	}
 
+	/** Whether interface {@code group} is attached anywhere the engine draws from: it is the top level, or the
+	 *  component table holds a node for it. That table is what opening and closing an interface changes. */
+	private static boolean groupMounted(Client c, int group)
+	{
+		if (group == c.getTopLevelInterfaceId())
+		{
+			return true;
+		}
+		final HashTable<WidgetNode> open = c.getComponentTable();
+		if (open == null)
+		{
+			return false;
+		}
+		for (final WidgetNode n : open)
+		{
+			if (n != null && n.getId() == group)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 	/** Is any chatbox dialogue interface open — NPC/player chat, "Select an Option", a "click here to continue"
 	 *  message, a level-up, a make-X/quantity selector, an item-reward box, or a box only the content that opened
-	 *  it has a name for? The named kinds are read off their content widget (loaded + shown), mirroring the
-	 *  in-tree dialogue plugins' detection; {@link #chatboxSubInterface} answers for the rest. */
+	 *  it has a name for? The named kinds are read off their content widget (loaded and mounted, see
+	 *  {@link #widgetShown}); {@link #chatboxSubInterface} answers for the rest. */
 	/**
 	 * Whether the engine is driving the chatbox MESSAGE LAYER — the Grand Exchange item search, the bank
 	 * search, and every "Enter amount" / "Enter name" prompt. {@code MESLAYERMODE} is the engine's own flag

@@ -22,6 +22,12 @@ as "What's new".
   sits at the bottom of the screen without covering any button, and goes as soon as a fight starts or something
   opens under it. Only its two buttons take a tap.
 
+### Fixed
+- **"How many would you like to make?" boxes can be tapped after a message box.** Once a message like "Your
+  inventory is too full" had shown, the next make box (chiselling amethyst, fletching, cooking) ignored taps, and
+  so did the chat from then on; only the number keys worked. The app kept treating the closed
+  message as still open and sent every tap to it.
+
 ## [0.9.0] - 2026-11-07
 
 ### Added

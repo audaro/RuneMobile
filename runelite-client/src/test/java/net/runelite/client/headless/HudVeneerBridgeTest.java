@@ -247,6 +247,68 @@ public class HudVeneerBridgeTest
 			HudVeneerBridge.getChatSnapshot().contains("\"dlgX\":93,\"dlgY\":8,\"dlgW\":519,\"dlgH\":142"));
 	}
 
+	// --- a box that has gone ----------------------------------------------------------------------------------
+	// An interface group stays resolvable after its box closes, so "its widget resolves" is not "it is open". A
+	// player mining until the inventory filled got the "too full" message, chiselled the amethyst, and could not
+	// tap the make-X box: the message still resolved, read as the dialogue on screen, and every tap went to its
+	// continue. These pin that open means mounted, for the named kinds as much as the unnamed ones.
+
+	/** A widget whose text is {@code text}, the one thing the message box's JSON reads off it. */
+	private static Widget textWidget(String text)
+	{
+		final Widget w = mock(Widget.class);
+		when(w.getText()).thenReturn(text);
+		return w;
+	}
+
+	@Test
+	public void anOpenMessageBoxIsADialogue()
+	{
+		final Client c = loggedInClientWith(openInterface(InterfaceID.Chatbox.CHATMODAL, InterfaceID.MESSAGEBOX));
+		final Widget text = textWidget("Your inventory is too full.");
+		when(c.getWidget(InterfaceID.Messagebox.TEXT)).thenReturn(text);
+		HudVeneerBridge.relocateChat(93, 8, true);
+
+		HudVeneerBridge.tick(c);
+
+		assertTrue("a mounted message box is the dialogue on screen",
+			HudVeneerBridge.getChatSnapshot().contains("\"dialogueActive\":true"));
+		assertTrue("and it is published as the message it is", HudVeneerBridge.getDialogueJson().contains("\"type\":\"message\""));
+	}
+
+	@Test
+	public void aMessageBoxThatHasClosedIsNotADialogue()
+	{
+		// Its widgets still resolve, but nothing in the component table holds it. Reading it as open hid the chat
+		// behind a box that was not there and turned every tap on the chat into a continue.
+		final Client c = loggedInClientWith(openInterface(InterfaceID.ToplevelOsrsStretch.ORBS, InterfaceID.ORBS));
+		final Widget gone = textWidget("");
+		when(c.getWidget(InterfaceID.Messagebox.TEXT)).thenReturn(gone);
+		HudVeneerBridge.relocateChat(93, 8, true);
+
+		HudVeneerBridge.tick(c);
+
+		assertTrue("a box that has closed is not a dialogue, however long its widgets stay loaded",
+			HudVeneerBridge.getChatSnapshot().contains("\"dialogueActive\":false"));
+	}
+
+	@Test
+	public void makeXAfterAClosedMessageBoxTakesTheTap()
+	{
+		// The player's sequence: the make-X box is what is on the chatbox, the message it replaced still resolves.
+		// The tap on an item has to fire that item's Make, not a continue on the message.
+		final Widget box = widgetAt(InterfaceID.SKILLMULTI << 16, 93, 8, 519, 142);
+		final Widget item = widgetAt((InterfaceID.SKILLMULTI << 16) | 15, 200, 60, 60, 60, "Make");
+		when(box.getStaticChildren()).thenReturn(new Widget[]{item});
+		final Client c = clientWithDialogue(InterfaceID.SKILLMULTI, box);
+		final Widget gone = textWidget("");
+		when(c.getWidget(InterfaceID.Messagebox.TEXT)).thenReturn(gone);
+
+		tapAfterPublish(c, 230, 90);
+
+		verify(c).menuAction(-1, (InterfaceID.SKILLMULTI << 16) | 15, MenuAction.CC_OP, 1, -1, "Make", "");
+	}
+
 	// --- pressing an unnamed dialogue --------------------------------------------------------------------------
 	// Its buttons are the box's OWN components, so there is no modelled continue or option row to fire, and a
 	// click at the finger is resolved against the scene behind the relocated chatbox -- it walks the player past
