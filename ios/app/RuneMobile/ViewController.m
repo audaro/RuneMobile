@@ -12,6 +12,7 @@
 #import "RMResidency.h"
 #import "RMGameSettings.h"
 #import "RMHeat.h"
+#import "RMHeatNotice.h"
 #import "RouteCBridge.h"            // GPU Route C bridge (backend selected by RC_BACKEND_ANGLE in the build)
 #import <QuartzCore/QuartzCore.h>
 #if !defined(RC_BACKEND_ANGLE)
@@ -675,6 +676,11 @@ static NSString *RMPasteLine(NSString *s) {
 @property (nonatomic, assign) long long heatGameCpuNanos; // the game thread's CPU, likewise
 @property (nonatomic, assign) long heatGpuWaitNanos;      // its time waiting for the GPU, likewise
 @property (nonatomic, assign) double heatAppCpuSeconds;   // the whole app's CPU, likewise
+// The hot-phone notice (offerHeatNotice): offers Lower resolution when hot, at most once a launch, between fights.
+@property (nonatomic, strong) RMHeatNoticeView *heatNotice;       // nil unless it's up
+@property (nonatomic, assign) BOOL heatNoticeOffered;             // it has been up this launch
+@property (nonatomic, assign) CFTimeInterval heatNoticeCalmSince; // logged in and out of combat since, 0 = not now
+@property (nonatomic, assign) CFTimeInterval heatNoticeShownAt;
 @property (nonatomic, assign) BOOL newInstallQueued;      // this launch has queued a new install's settings
 @property (nonatomic, assign) long long newInstallSaveId; // the save behind them, 0 until it's queued
 @property (nonatomic, strong) UIView *pluginPanel;
@@ -3462,6 +3468,7 @@ static const int kCamPitchPxPerSec = 200;
     // the GPU renderer on ran into this every time. An OOM during world load is unaffected; it
     // happens in the foreground with the cookie still armed, and still demotes correctly.
     self.appBackgrounded = YES;
+    [self hideHeatNotice:@"the app went to the background"];
     if (self.hdBootCookieArmed && !self.hdBootCookieSettled) {
         [self hdBootCookieClear];
         self.hdBootCookieArmed = NO;
@@ -5952,8 +5959,18 @@ static int simHeatLowPower = -1;
         self.heatFpsLimit = limit.fps;
     }
     // A backgrounded app may not touch the GPU, and 117HD does to change its scale. The step waits for the foreground.
-    if (self.pendingRouteCZone && !self.appBackgrounded)
-        [self.heatScaleKeeper stepWithLimit:limit.scalePercent thermal:thermal];
+    // The resolution comes down only if the player has said it may (Game settings > Lower resolution when hot).
+    // Without that the keeper is given no limit, so it just puts back anything an earlier throttle took, and a phone
+    // hot enough for a lower resolution offers the switch instead.
+    BOOL lowerResolution = [RMGameSettings heatLowerResolution];
+    BOOL onScreen = self.pendingRouteCZone && !self.appBackgrounded;
+    if (onScreen)
+        [self.heatScaleKeeper stepWithLimit:lowerResolution ? limit.scalePercent : 0 thermal:thermal];
+    // The offer is for a phone that's hot now, not one the policy still holds a limit on while it cools.
+    if (onScreen && !lowerResolution && thermal >= NSProcessInfoThermalStateSerious)
+        [self offerHeatNotice];
+    else
+        self.heatNoticeCalmSince = 0; // a calm spell starts over once it's hot again
 
     // Whichever counter moved: the engine's, or the frames handed to the screen, because 117HD's direct present never
     // bumps the engine's, and before the world loads it is the engine that draws.
@@ -5978,12 +5995,133 @@ static int simHeatLowPower = -1;
         .fpsLimit = self.heatFpsLimit,
         .scalePercent = self.pendingRouteCZone ? self.heatScaleKeeper.appliedScale : 0,
         .baselineScale = self.pendingRouteCZone ? self.heatScaleKeeper.baselineScale : 0,
+        .lowerResolution = lowerResolution,
     };
     self.heatGameCpuNanos = gameCpu;
     self.heatGpuWaitNanos = gpuWait;
     self.heatAppCpuSeconds = appCpu;
     [RMHeatLog.shared addReading:reading at:now];
     [self applyNewInstallDefaults];
+}
+
+// Out of combat this long before the hot-phone notice may appear, and it goes by itself after kHeatNoticeSeconds.
+static const CFTimeInterval kHeatNoticeCalmSeconds = 10.0;
+static const CFTimeInterval kHeatNoticeSeconds = 20.0;
+static const CGFloat kHeatNoticeWideMin = 460; // narrower than this, the notice stacks its buttons under the text
+
+// The phone is hot enough that 117HD's resolution would come down, but the player hasn't allowed it. Offers the
+// switch once a launch, and never in a fight: it waits until the player has been logged in, out of combat and on the
+// plain game screen for kHeatNoticeCalmSeconds. Even then it takes no touch but its own two buttons.
+- (void)offerHeatNotice {
+    if (self.heatNoticeOffered || self.heatNotice || [RMGameSettings heatNoticeOff])
+        return;
+    CFTimeInterval now = CACurrentMediaTime();
+    if (![self heatNoticeCalm]) {
+        self.heatNoticeCalmSince = 0;
+        return;
+    }
+    if (self.heatNoticeCalmSince == 0)
+        self.heatNoticeCalmSince = now;
+    if (now - self.heatNoticeCalmSince >= kHeatNoticeCalmSeconds)
+        [self showHeatNotice];
+}
+
+// Logged in, not fighting, and nothing else over the game. NO when the game can't say.
+- (BOOL)heatNoticeCalm {
+    if (self.appBackgrounded || self.mapOpen || self.presentedViewController || !self.layoutSwitchButton.hidden)
+        return NO;
+    NSString *snap = [JVMLauncher chromeSnapshot];
+    NSDictionary *d = snap.length ? parseBridgeJSON(snap, "ViewController.heatNoticeCalm") : nil;
+    return [d isKindOfClass:[NSDictionary class]] && [d[@"loggedIn"] boolValue] && ![d[@"inCombat"] boolValue];
+}
+
+- (void)showHeatNotice {
+    self.heatNoticeOffered = YES;
+    __weak typeof(self) ws = self;
+    RMHeatNoticeView *v = [[RMHeatNoticeView alloc]
+        initWithTurnOn:^{
+            [RMGameSettings setHeatLowerResolution:YES];
+            [ws hideHeatNotice:@"turned on"];
+            [ws showToast:@"Lower resolution when hot is on"];
+        }
+        neverAgain:^{
+            [RMGameSettings setHeatNoticeOff:YES];
+            [ws hideHeatNotice:@"don't show again"];
+        }];
+    [self.screen addSubview:v];
+    // Over the world, never over the game's own HUD. On a wide screen with the chat in the top half (the landscape
+    // layout) it goes just under the chat, lined up with it, which keeps it off the orbs and the minimap on the right.
+    // A narrow screen (portrait) has no room beside them, so it stacks its buttons and goes centred under the lowest
+    // of the chat, minimap and orbs at the top. With none of them at the top it sits top centre, under the keyboard
+    // toggle, where the layout switch would; that's never up at the same time (heatNoticeCalm).
+    UILayoutGuide *g = self.view.safeAreaLayoutGuide;
+    [self.view layoutIfNeeded];
+    CGFloat midY = CGRectGetMidY(self.screen.bounds);
+    CGRect chat = [self heatNoticeHudRect:@"chat"];
+    BOOL chatUp = !CGRectIsEmpty(chat) && CGRectGetMidY(chat) < midY;
+    CGRect safe = g.layoutFrame;
+    CGFloat room = chatUp ? CGRectGetMaxX(safe) - 8 - CGRectGetMinX([self.screen convertRect:chat toView:self.view])
+                          : safe.size.width - 24;
+    v.compact = room < kHeatNoticeWideMin;
+    NSMutableArray<NSLayoutConstraint *> *place = [NSMutableArray arrayWithArray:@[
+        [v.widthAnchor constraintLessThanOrEqualToAnchor:g.widthAnchor
+                                                constant:-24],
+        [v.trailingAnchor constraintLessThanOrEqualToAnchor:g.trailingAnchor
+                                                   constant:-8],
+    ]];
+    if (chatUp && !v.compact) {
+        [place addObject:[v.topAnchor constraintEqualToAnchor:self.screen.topAnchor constant:CGRectGetMaxY(chat) + 6]];
+        [place addObject:[v.leadingAnchor constraintEqualToAnchor:self.screen.leadingAnchor constant:CGRectGetMinX(chat)]];
+    } else {
+        CGFloat below = 0;
+        for (NSString *key in @[ @"chat", @"minimap", @"orbs" ]) {
+            CGRect r = [self heatNoticeHudRect:key];
+            if (!CGRectIsEmpty(r) && CGRectGetMidY(r) < midY)
+                below = MAX(below, CGRectGetMaxY(r));
+        }
+        if (below > 0)
+            [place addObject:[v.topAnchor constraintEqualToAnchor:self.screen.topAnchor constant:below + 6]];
+        else
+            [place addObject:[v.topAnchor constraintEqualToAnchor:g.topAnchor constant:52]];
+        [place addObject:[v.centerXAnchor constraintEqualToAnchor:g.centerXAnchor]];
+    }
+    [NSLayoutConstraint activateConstraints:place];
+    [v present];
+    self.heatNotice = v;
+    self.heatNoticeShownAt = CACurrentMediaTime();
+    [self appendLine:@"[heat] hot-phone notice shown: offers Lower resolution when hot"];
+}
+
+// One of the game's HUD boxes on screen ("chat", "minimap", "orbs"), from the chrome snapshot, or CGRectZero when it
+// isn't showing.
+- (CGRect)heatNoticeHudRect:(NSString *)key {
+    NSString *snap = [JVMLauncher chromeSnapshot];
+    NSDictionary *d = snap.length ? parseBridgeJSON(snap, "ViewController.heatNoticeHudRect") : nil;
+    NSArray *b = [d isKindOfClass:[NSDictionary class]] ? d[key] : nil;
+    if (![b isKindOfClass:[NSArray class]] || b.count != 4)
+        return CGRectZero;
+    return [self viewRectForGameX:[b[0] intValue] y:[b[1] intValue] w:[b[2] intValue] h:[b[3] intValue]];
+}
+
+// While it's up, a few times a second: it goes the moment a fight starts or anything else takes the screen, once the
+// switch is on (from Game settings too), and after kHeatNoticeSeconds.
+- (void)updateHeatNotice {
+    if (!self.heatNotice)
+        return;
+    if ([RMGameSettings heatLowerResolution])
+        [self hideHeatNotice:@"turned on in Game settings"];
+    else if (CACurrentMediaTime() - self.heatNoticeShownAt >= kHeatNoticeSeconds)
+        [self hideHeatNotice:@"timed out"];
+    else if (![self heatNoticeCalm])
+        [self hideHeatNotice:@"a fight started or the screen changed"];
+}
+
+- (void)hideHeatNotice:(NSString *)why {
+    if (!self.heatNotice)
+        return;
+    [self.heatNotice dismiss];
+    self.heatNotice = nil;
+    [self appendLine:[NSString stringWithFormat:@"[heat] hot-phone notice gone: %@", why]];
 }
 
 // A new install starts light, on settings the player can raise: a frame-rate cap, set the way Game settings sets one so
@@ -7633,6 +7771,8 @@ static CGRect mapRectFromArr(NSArray *a) {
     if (self.framesShown % 120 == 0) {
         [self heatTick];
     }
+    if (self.heatNotice && self.framesShown % 15 == 0)
+        [self updateHeatNotice];
 
     // W3 A3: refresh the enlarged native chat tab buttons (~10 Hz). Self-gates on chrome toggle + layout; runs
     // every tick (not only when chromeVisible) so it hides itself promptly when the chrome is toggled off.
@@ -10133,6 +10273,22 @@ static const CFTimeInterval kSimConfirmTimeout = 15.0;
         NSArray<NSString *> *parts = [name componentsSeparatedByString:@" "];
         simHeatThermal = parts[1].intValue;
         simHeatLowPower = parts.count > 2 ? parts[2].intValue : -1;
+        [self appendLine:[NSString stringWithFormat:@"[screen] ready %@ %@", seq, name]];
+        return;
+    }
+    // "heat-notice": put the hot-phone notice up now, whatever the renderer and the phone's heat, so a capture can
+    // show it over the game. It counts as this launch's notice, as a real one would. "heat-notice -" takes it down.
+    if ([name isEqualToString:@"heat-notice"] || [name isEqualToString:@"heat-notice -"]) {
+        if ([name hasSuffix:@"-"])
+            [self hideHeatNotice:@"driver"];
+        else if (!self.heatNotice)
+            [self showHeatNotice];
+        [self appendLine:[NSString stringWithFormat:@"[screen] ready %@ %@", seq, name]];
+        return;
+    }
+    // "heat-lower <0|1>": Game settings > Lower resolution when hot, as its switch sets it.
+    if ([name hasPrefix:@"heat-lower "]) {
+        [RMGameSettings setHeatLowerResolution:[name substringFromIndex:11].intValue != 0];
         [self appendLine:[NSString stringWithFormat:@"[screen] ready %@ %@", seq, name]];
         return;
     }

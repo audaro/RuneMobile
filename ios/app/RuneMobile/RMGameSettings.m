@@ -13,6 +13,8 @@ static NSString *const kPortraitKey = @"screen.portrait";
 static NSString *const kAutoRotateKey = @"screen.auto";
 static NSString *const kAutoLoginKey = @"login.auto";
 static NSString *const kGameSoundKey = @"audio.game";
+static NSString *const kHeatLowerResolutionKey = @"heat.lowerResolution";
+static NSString *const kHeatNoticeOffKey = @"heat.noticeOff";
 
 static const NSInteger kLongPressMinMs = 200, kLongPressMaxMs = 1000, kLongPressStepMs = 50, kLongPressDefaultMs = 400;
 static const NSInteger kDragHoldMaxMs = 150;
@@ -48,6 +50,8 @@ static const double kMotionHz = 10.0, kGravitySmoothing = 0.3, kTurnDwell = 0.4;
             kAutoRotateKey : @NO,
             kAutoLoginKey : @NO,
             kGameSoundKey : @YES,
+            kHeatLowerResolutionKey : @NO,
+            kHeatNoticeOffKey : @NO,
         }];
     });
     return [NSUserDefaults standardUserDefaults];
@@ -69,6 +73,23 @@ static const double kMotionHz = 10.0, kGravitySmoothing = 0.3, kTurnDwell = 0.4;
 + (void)setAutoLogin:(BOOL)on {
     [[self defaults] setBool:on forKey:kAutoLoginKey];
     [self changed];
+}
+
++ (BOOL)heatLowerResolution {
+    return [[self defaults] boolForKey:kHeatLowerResolutionKey];
+}
+
++ (void)setHeatLowerResolution:(BOOL)on {
+    [[self defaults] setBool:on forKey:kHeatLowerResolutionKey];
+    [self changed];
+}
+
++ (BOOL)heatNoticeOff {
+    return [[self defaults] boolForKey:kHeatNoticeOffKey];
+}
+
++ (void)setHeatNoticeOff:(BOOL)off {
+    [[self defaults] setBool:off forKey:kHeatNoticeOffKey];
 }
 
 + (void)changed {
@@ -321,6 +342,7 @@ static UIInterfaceOrientationMask maskForGravity(CMAcceleration g, UIInterfaceOr
 typedef NS_ENUM(NSInteger, RMGsSection) { RMGsScreen = 0,
                                           RMGsTouch,
                                           RMGsGame,
+                                          RMGsHeat,
                                           RMGsSound,
                                           RMGsLogin,
                                           RMGsHaptics };
@@ -397,6 +419,8 @@ enum { kTagLongPress = 1,
             return 2; // long-press time, camera sensitivity
         case RMGsGame:
             return self.gameLoaded ? 2 : 0; // idle logout, frame-rate cap
+        case RMGsHeat:
+            return 1; // lower 117HD's resolution when hot
         case RMGsSound:
             return 1; // Game sound
         case RMGsLogin:
@@ -416,6 +440,8 @@ enum { kTagLongPress = 1,
             return @"TOUCH";
         case RMGsGame:
             return @"GAME";
+        case RMGsHeat:
+            return @"117HD";
         case RMGsSound:
             return @"SOUND";
         case RMGsLogin:
@@ -544,6 +570,17 @@ enum { kTagLongPress = 1,
         seg.accessibilityLabel = @"Frame-rate cap";
         [seg addTarget:self action:@selector(onFpsCap:) forControlEvents:UIControlEventValueChanged];
         [self stackInCell:cell views:@[ name, seg ]];
+    } else if (ip.section == RMGsHeat) {
+        cell.textLabel.text = @"Lower resolution when hot";
+        cell.detailTextLabel.text = @"While your phone is hot, 117HD draws at no more than 65% (50% when it's very hot), then "
+                                    @"goes back to your setting when it cools. Off, only the frame rate is limited.";
+        cell.detailTextLabel.numberOfLines = 0;
+        UISwitch *sw = [[UISwitch alloc] init];
+        sw.on = [RMGameSettings heatLowerResolution];
+        sw.onTintColor = [self accent];
+        sw.accessibilityLabel = @"Lower 117HD resolution when hot";
+        [sw addTarget:self action:@selector(onHeatLowerResolution:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = sw;
     } else if (ip.section == RMGsSound) {
         cell.textLabel.text = @"Game sound";
         cell.detailTextLabel.text = @"Music, sound effects and area sounds. Their volumes are in the game's own settings.";
@@ -636,6 +673,10 @@ enum { kTagLongPress = 1,
 
 - (void)onGameSound:(UISwitch *)sw {
     [RMGameSettings setGameSound:sw.on];
+}
+
+- (void)onHeatLowerResolution:(UISwitch *)sw {
+    [RMGameSettings setHeatLowerResolution:sw.on];
 }
 
 - (void)onAutoLogin:(UISwitch *)sw {

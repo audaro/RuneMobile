@@ -339,8 +339,13 @@ static NSString *msText(double ms) {
             [out appendFormat:@"limited to %d fps | ", _latest.fpsLimit];
         else
             [out appendString:@"no limit | "];
-        if (_latest.scalePercent)
-            [out appendFormat:@"117HD scale %d of %d | ", _latest.scalePercent, _latest.baselineScale];
+        // Off, with nothing to put back, the keeper doesn't read the setting, so its numbers could be from before the
+        // player's last move. Better none than a wrong one.
+        if (_latest.scalePercent && !_latest.lowerResolution && _latest.scalePercent == _latest.baselineScale)
+            [out appendString:@"117HD scale left to the player, lower when hot off | "];
+        else if (_latest.scalePercent)
+            [out appendFormat:@"117HD scale %d of %d, lower when hot %@ | ", _latest.scalePercent,
+                              _latest.baselineScale, _latest.lowerResolution ? @"on" : @"off"];
         [out appendFormat:@"%@ | Low Power Mode %@\n", batteryText(&_latest), _latest.lowPower ? @"on" : @"off"];
         [out appendFormat:@"This launch: %.0f min, %.0f min above nominal, %.0f min in the background\n",
                           _playedSeconds / 60.0, _warmSeconds / 60.0, _backgroundSeconds / 60.0];

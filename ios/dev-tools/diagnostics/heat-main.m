@@ -191,8 +191,20 @@ static void checkLog(void) {
     check(minutes.count == 2 && has(minutes[1], @"nominal") && has(minutes[1], @"limit 30"),
           [NSString stringWithFormat:@"the next minute starts clean:\n%@", report]);
     check(has(report, @"limited to 30 fps"), @"the limit in force");
-    check(has(report, @"117HD scale 65 of 100"), @"the scale in force");
+    check(has(report, @"117HD scale 65 of 100, lower when hot off"), @"the scale in force");
     check(has(report, @"on battery 50%"), @"the battery");
+
+    // Lower resolution when hot off with nothing to put back: the keeper hasn't read the setting, so no numbers.
+    RMHeatReading own = reading(2, 100);
+    own.scalePercent = 100;
+    own.baselineScale = 100;
+    [log addReading:own at:224];
+    check(has([log report], @"117HD scale left to the player, lower when hot off"),
+          [NSString stringWithFormat:@"no stale numbers when it's off:\n%@", [log report]]);
+    own.lowerResolution = YES;
+    [log addReading:own at:226];
+    check(has([log report], @"117HD scale 100 of 100, lower when hot on"),
+          [NSString stringWithFormat:@"the numbers when it's on:\n%@", [log report]]);
     check(has(report, @"Low Power Mode off"), @"Low Power Mode");
 
     // A suspended app: the gap isn't play time, and the frames either side of it aren't a frame rate.

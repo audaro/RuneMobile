@@ -7,15 +7,16 @@ renderer this boots to the login screen and checks that:
   - Low Power Mode holds it to 30 fps, and turning it off lifts that at once
   - a critical phone holds it to 20 fps, and the report shows the state, the limit and the frame rate
   - the report's minute lines say where the frames went
-On the first renderer it also checks the limit comes off a step after a minute of calm. On 117HD it moves the
-resolution setting as a player would, before and during a throttle, and checks the player's value is the one that
-comes back, then kills the app mid-throttle with that throttle saved and checks the next launch puts the player's
+On the first renderer it also checks the limit comes off a step after a minute of calm. On 117HD it first checks that
+a hot phone leaves the resolution alone while Game settings > Lower resolution when hot is off, as it is out of the
+box, then turns it on for the rest. It moves the resolution setting as a player would, before and during a throttle,
+and checks the player's value is the one that comes back, then kills the app mid-throttle with that throttle saved and checks the next launch puts the player's
 value on disk before it drops the marker. It does that again with a player's move during a steady throttle: the limit
 has to hold, and the move has to reach the marker before the kill. Then, last, it boots as a new install does, with no
 saved renderer and 117HD's seed sentinel taken out of the profile. The app has to pick base GPU, a 30 fps cap and base
 GPU's shorter draw distance, with both surviving a kill as soon as it says they're saved. A cap taken off and a distance
 moved have to stay as the player left them, and 117HD has to start on its light settings and boot for real on them. The
-profile and the app's defaults are put back afterwards.
+profile, the app's defaults and Lower resolution when hot are put back afterwards.
 
 What the simulator can't say: how hot any of this runs, or anything in the world. There the GPU modes draw with
 Apple's software renderer at about 3 fps, under every limit, and 117HD sits in its shader compile, so this stays at
@@ -138,6 +139,7 @@ def check_renderer(drv, udid, renderer, lift):
 
     check_timing(run, renderer, False)  # check_first_run starts 117HD for real: this launch waits for the world
     if renderer == "117hd":
+        check_left_alone(run)
         check_players_scale(run)
 
     run.heat(0, 1)
@@ -162,10 +164,35 @@ def check_renderer(drv, udid, renderer, lift):
     return run.problems
 
 
+def check_left_alone(run):
+    """Lower resolution when hot off: a hot phone keeps the player's resolution."""
+    for step in ("heat-lower 0", "hd-scale 80", "heat 2 0"):
+        ok, why, _seq = run.drv.open(step)
+        if not ok:
+            raise sd.DriverError(f"{step} failed: {why}")
+    if not run.wait_for("thermal serious", LIMIT_WAIT):
+        raise sd.DriverError(f"the report never got to serious: {run.now(run.section())}")
+    time.sleep(SETTLE)  # a few heat ticks, so a step down would have come by now
+    now = run.now(run.section())
+    # While the keeper has nothing to do it doesn't read the setting, so the report gives no numbers. The saved profile
+    # is the truth; the report only has to say it isn't throttling.
+    ok, why, _seq = run.drv.open("config-flush")
+    if not ok:
+        raise sd.DriverError(f"config-flush failed: {why}")
+    time.sleep(3)
+    saved = saved_scale(run.drv)
+    print(f"  serious, lower when hot off: saved scale {saved}; {now}", flush=True)
+    if "117HD scale left to the player, lower when hot off" not in now:
+        run.problems.append(f"a hot phone throttled with Lower resolution when hot off: {now}")
+    if saved != 80:
+        run.problems.append(f"a hot phone moved the resolution with Lower resolution when hot off: saved scale {saved}")
+
+
 def check_players_scale(run):
     """The player's own value survives the governor, whichever side of a throttle they set it, and the limit reaches
-    a value raised from under it. 100 is left behind."""
-    for step, want in (("hd-scale 80", None), ("heat 2 0", "117HD scale 65 of 80"), ("hd-scale 90", None),
+    a value raised from under it. 100 is left behind. Comes after check_left_alone, from serious at 80, and turns
+    Lower resolution when hot on, which is where the limit starts."""
+    for step, want in (("heat-lower 1", "117HD scale 65 of 80, lower when hot on"), ("hd-scale 90", None),
                        ("heat 0 0", "117HD scale 90 of 90"), ("hd-scale 40", None), ("heat 2 0", "117HD scale 40 of 40"),
                        ("hd-scale 100", "117HD scale 65 of 100"), ("heat 0 0", "117HD scale 100 of 100")):
         ok, why, _seq = run.drv.open(step)
@@ -461,6 +488,7 @@ def main():
             if renderer == "117hd":
                 problems += check_killed_mid_throttle(drv, udid)
                 problems += check_moved_during_steady_throttle(drv, udid)
+                drv.open("heat-lower 0")  # as it comes out of the box
         problems += check_first_run(drv, udid)
     except sd.DriverError as e:
         print(f"SIM_HEAT_RED {e}")

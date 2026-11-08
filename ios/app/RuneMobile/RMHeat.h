@@ -77,6 +77,7 @@ typedef struct {
     int fpsLimit;       // the limit in force, 0 for none
     int scalePercent;   // 117HD's scale in force, 0 on the other renderers
     int baselineScale;  // what the player set it to, 0 on the other renderers
+    BOOL lowerResolution; // Game settings > Lower resolution when hot, which lets the scale come down at all
 } RMHeatReading;
 
 /// CPU used by every thread in the app since launch.

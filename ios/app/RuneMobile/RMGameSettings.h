@@ -46,6 +46,12 @@ extern NSNotificationName const RMGameSettingsDidChangeNotification;
 
 + (BOOL)autoLogin;
 + (void)setAutoLogin:(BOOL)on;
+/// Lower 117HD's resolution while the phone is hot (default NO). Off, the heat response only limits the frame rate.
++ (BOOL)heatLowerResolution;
++ (void)setHeatLowerResolution:(BOOL)on;
+/// The player tapped "Don't show again" on the hot-phone notice (default NO).
++ (BOOL)heatNoticeOff;
++ (void)setHeatNoticeOff:(BOOL)off;
 /// The orientations the window may take under the setting.
 + (UIInterfaceOrientationMask)orientationMask;
 /// Turn `window` to the setting now. The game resizes its canvas when the window turns.
