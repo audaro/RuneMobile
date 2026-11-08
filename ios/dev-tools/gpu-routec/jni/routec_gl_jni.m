@@ -690,9 +690,12 @@ static JNIEXPORT void JNICALL rc_GL_glReadPixels_0(JNIEnv *env, jclass cls, jint
 // a frame) reads the finished frame into a BufferedImage's int[] as GL_BGRA / GL_UNSIGNED_INT_8_8_8_8_REV: one
 // 0xAARRGGBB word per pixel. GLES reads only GL_RGBA / GL_UNSIGNED_BYTE (0xAABBGGRR on little-endian), so read that
 // and swap R and B on the way out; the plugin flips the rows itself. It runs after swapBuffers, whose readback left
-// our offscreen FBO bound for reading, with the frame still in it. Unbound, this overload threw UnsatisfiedLinkError
-// on the client thread at the first screenshot. The scratch lives only for the call: screenshots are rare, and a
-// frame-sized buffer kept for good would be ~4 MB held for nothing.
+// our offscreen FBO bound for reading, with the frame still in it. That holds because base GPU always presents by
+// readback: the shell arms a present layer only for 117HD (ViewController.m, pendingRouteCZoneDirect), switching
+// renderer needs a relaunch, and 117HD reads through the ByteBuffer overload above. Give base GPU the CAEAGL direct
+// present and this reads an undefined drawable (no retained backing), whatever is bound. Unbound, this overload threw
+// UnsatisfiedLinkError on the client thread at the first screenshot. The scratch lives only for the call:
+// screenshots are rare, and a frame-sized buffer kept for good would be ~4 MB held for nothing.
 static JNIEXPORT void JNICALL rc_GL_glReadPixels_1(JNIEnv *env, jclass cls, jint a0, jint a1, jint a2, jint a3, jint a4, jint a5, jintArray a6) {
     if (!a6 || a2 <= 0 || a3 <= 0)
         return;
