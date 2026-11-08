@@ -118,10 +118,11 @@ final class DataOrbsNotice
 		c.addChatMessage(ChatMessageType.GAMEMESSAGE, "", MESSAGE, null);
 	}
 
-	/** Both, because the setting alone isn't the orbs: the server can still have them open from before it changed. */
+	/** Both, because the setting alone isn't the orbs: the server can still have them open from before it changed.
+	 *  Open means mounted, not loaded: the orbs group can resolve while the server holds it closed. */
 	private static boolean orbsOff(Client c)
 	{
-		return c.getVarbitValue(VarbitID.ORBS_DISABLED) != 0 && c.getWidget(InterfaceID.Orbs.ORB_HEALTH) == null;
+		return c.getVarbitValue(VarbitID.ORBS_DISABLED) != 0 && !Interfaces.mounted(c, InterfaceID.ORBS);
 	}
 
 	/** Test seam: forget the current login. */

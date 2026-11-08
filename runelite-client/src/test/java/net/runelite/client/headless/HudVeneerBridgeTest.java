@@ -26,6 +26,7 @@ package net.runelite.client.headless;
 
 import java.awt.Rectangle;
 import java.util.Collections;
+import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.HashTable;
@@ -605,6 +606,25 @@ public class HudVeneerBridgeTest
 		// NOT assertTrue: the label is off client-wide (HOVER_TEXT), and nothing switches it back on — see
 		// theHoverLabelIsNeverSwitchedOn for why that is deliberate rather than an oversight.
 		assertFalse("the hover-option text stays off — it is off client-wide, not just over the map", text[0]);
+	}
+
+	/** A closed orbs group can still resolve, with an orb that was never laid out. The map button must say why there
+	 *  are no orbs, not click that orb and do nothing. */
+	@Test
+	public void theMapButtonWithTheOrbsClosedSaysWhy()
+	{
+		DataOrbsNotice.resetForTest();
+		@SuppressWarnings("unchecked")
+		final HashTable<WidgetNode> nothingOpen = mock(HashTable.class);
+		when(nothingOpen.iterator()).thenAnswer(inv -> Collections.<WidgetNode>emptyList().iterator());
+		final Client c = loggedInClientWith(nothingOpen);
+		when(c.getVarbitValue(VarbitID.ORBS_DISABLED)).thenReturn(1);
+		when(c.getWidget(InterfaceID.Orbs.ORB_WORLDMAP)).thenReturn(mock(Widget.class));
+
+		HudVeneerBridge.openWorldMap();
+		HudVeneerBridge.tick(c);
+
+		verify(c).addChatMessage(ChatMessageType.GAMEMESSAGE, "", DataOrbsNotice.MESSAGE, null);
 	}
 
 	@Test

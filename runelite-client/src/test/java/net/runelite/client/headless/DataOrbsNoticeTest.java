@@ -24,9 +24,13 @@
  */
 package net.runelite.client.headless;
 
+import java.util.ArrayList;
+import java.util.List;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
+import net.runelite.api.HashTable;
+import net.runelite.api.WidgetNode;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
@@ -62,10 +66,29 @@ public class DataOrbsNoticeTest
 		DataOrbsNotice.tick(c);
 	}
 
+	/** Open = the server opened the orbs: they're loaded AND the component table holds them. */
 	private void orbs(boolean settingOn, boolean open)
 	{
 		when(c.getVarbitValue(VarbitID.ORBS_DISABLED)).thenReturn(settingOn ? 0 : 1);
 		when(c.getWidget(InterfaceID.Orbs.ORB_HEALTH)).thenReturn(open ? mock(Widget.class) : null);
+		final HashTable<WidgetNode> table = open ? tableHolding(InterfaceID.ORBS) : tableHolding(); // built before the when(): it stubs mocks of its own
+		when(c.getComponentTable()).thenReturn(table);
+	}
+
+	/** A component table with one open-interface node per group; a fresh iterator per walk. */
+	private static HashTable<WidgetNode> tableHolding(int... groups)
+	{
+		final List<WidgetNode> nodes = new ArrayList<>();
+		for (final int g : groups)
+		{
+			final WidgetNode n = mock(WidgetNode.class);
+			when(n.getId()).thenReturn(g);
+			nodes.add(n);
+		}
+		@SuppressWarnings("unchecked")
+		final HashTable<WidgetNode> table = mock(HashTable.class);
+		when(table.iterator()).thenAnswer(inv -> nodes.iterator());
+		return table;
 	}
 
 	private void verifyTold(int times)
@@ -119,6 +142,17 @@ public class DataOrbsNoticeTest
 		frameAfter(0);
 		frameAfter(DataOrbsNotice.SETTLE_TICKS);
 		verifyTold(0);
+	}
+
+	/** The orbs group can load with the server holding it closed. Loaded is not open, so the player still hears why. */
+	@Test
+	public void orbsLoadedButNotOpenStillSaySo()
+	{
+		orbs(false, false);
+		when(c.getWidget(InterfaceID.Orbs.ORB_HEALTH)).thenReturn(mock(Widget.class));
+		frameAfter(0);
+		frameAfter(DataOrbsNotice.SETTLE_TICKS);
+		verifyTold(1);
 	}
 
 	@Test

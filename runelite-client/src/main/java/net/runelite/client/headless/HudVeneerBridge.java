@@ -2182,8 +2182,9 @@ public final class HudVeneerBridge
 	{
 		try
 		{
+			// Open means mounted: a closed orbs group can still resolve, and its orb was never laid out.
 			final Widget orb = c.getWidget(InterfaceID.Orbs.ORB_WORLDMAP);
-			if (orb == null)
+			if (orb == null || !Interfaces.mounted(c, InterfaceID.ORBS))
 			{
 				DataOrbsNotice.mapTapped(c);
 				return;
@@ -3599,7 +3600,7 @@ public final class HudVeneerBridge
 	}
 
 	/** True while {@code id}'s interface is OPEN: the widget resolves AND its group is mounted (see
-	 *  {@link #groupMounted}). Loaded is not open. A group stays resolvable after its box has gone, so a
+	 *  {@link Interfaces#mounted}). Loaded is not open. A group stays resolvable after its box has gone, so a
 	 *  loaded-only test kept a closed "inventory too full" message reading as the dialogue on screen: the make-X
 	 *  box that took its place was never offered a tap, every tap on it went to the gone message's continue, and
 	 *  the chat stayed hidden behind a dialogue that was not there. NOTE: deliberately NOT {@code !isHidden()},
@@ -3608,35 +3609,12 @@ public final class HudVeneerBridge
 	{
 		try
 		{
-			return c.getWidget(id) != null && groupMounted(c, id >>> 16);
+			return c.getWidget(id) != null && Interfaces.mounted(c, id >>> 16);
 		}
 		catch (RuntimeException ex)
 		{
 			return false;
 		}
-	}
-
-	/** Whether interface {@code group} is attached anywhere the engine draws from: it is the top level, or the
-	 *  component table holds a node for it. That table is what opening and closing an interface changes. */
-	private static boolean groupMounted(Client c, int group)
-	{
-		if (group == c.getTopLevelInterfaceId())
-		{
-			return true;
-		}
-		final HashTable<WidgetNode> open = c.getComponentTable();
-		if (open == null)
-		{
-			return false;
-		}
-		for (final WidgetNode n : open)
-		{
-			if (n != null && n.getId() == group)
-			{
-				return true;
-			}
-		}
-		return false;
 	}
 
 	/** Is any chatbox dialogue interface open — NPC/player chat, "Select an Option", a "click here to continue"

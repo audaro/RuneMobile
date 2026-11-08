@@ -35,7 +35,6 @@ import net.runelite.api.Player;
 import net.runelite.api.WorldView;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarClientID;
-import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 
 /**
@@ -433,7 +432,7 @@ public final class MobileChromeBridge
 		{
 			if (resized)
 			{
-				return c.getVarbitValue(VarbitID.RESIZABLE_STONE_ARRANGEMENT) == 1 ? Root.PRE_EOC : Root.OSRS_STRETCH;
+				return Interfaces.stonesOnPreEoc(c) ? Root.PRE_EOC : Root.OSRS_STRETCH;
 			}
 			return Root.FIXED;
 		}

@@ -347,7 +347,7 @@ public final class WorldSwitcherBridge
 		}
 		// Fail fast (don't arm HeadlessLogin) if we can't drive the logout: the logout button lives in the logout
 		// side-panel, reachable only via the STONE10 tab of a resizable root. In FIXED (or before the toplevel is
-		// built) neither stone resolves, so the hop can't proceed — abort cleanly rather than arm a relogin that
+		// built) there is no stone to press, so the hop can't proceed — abort cleanly rather than arm a relogin that
 		// would strand HeadlessLogin waiting for a logout that never comes.
 		if (logoutStoneId(c) == -1)
 		{
@@ -429,7 +429,7 @@ public final class WorldSwitcherBridge
 
 	/** Open the logout side-panel so {@code Logout.LOGOUT} is built, by running the logout tab stone's op the same
 	 *  way the chrome opens tabs ({@code createScriptEventBuilder}). STONE10 is the logout tab in BOTH resizable
-	 *  roots (ToplevelPreEoc / ToplevelOsrsStretch); pick whichever toplevel is currently loaded. Client thread. */
+	 *  roots (ToplevelPreEoc / ToplevelOsrsStretch); see {@link #logoutStoneId} for which. Client thread. */
 	private static void openLogoutTab(Client c)
 	{
 		try
@@ -437,7 +437,7 @@ public final class WorldSwitcherBridge
 			final int stoneId = logoutStoneId(c);
 			if (stoneId == -1)
 			{
-				return;   // neither resizable toplevel loaded (e.g. FIXED) — can't resolve the logout tab
+				return;   // FIXED, or the resizable root isn't built yet — can't resolve the logout tab
 			}
 			final Widget stone = c.getWidget(stoneId);
 			final Object[] op = stone == null ? null : stone.getOnOpListener();
@@ -453,19 +453,18 @@ public final class WorldSwitcherBridge
 		}
 	}
 
-	/** The logout tab stone id for the currently-loaded resizable toplevel (STONE10 in both ToplevelPreEoc and
-	 *  ToplevelOsrsStretch), or -1 if neither is loaded (FIXED / not yet built). Client thread. */
-	private static int logoutStoneId(Client c)
+	/** The logout tab stone (STONE10) of the resizable root the chrome presses tabs on, or -1 in FIXED or before
+	 *  that root is built. The root comes from the arrangement setting ({@link Interfaces#stonesOnPreEoc}), the same
+	 *  rule as the chrome's tabs, not from which toplevel is loaded: after a layout switch the old toplevel can still
+	 *  resolve, and its stone does nothing. Client thread. */
+	static int logoutStoneId(Client c)
 	{
-		if (c.getWidget(InterfaceID.ToplevelPreEoc.STONE10) != null)
+		if (!c.isResized())
 		{
-			return InterfaceID.ToplevelPreEoc.STONE10;
+			return -1;
 		}
-		if (c.getWidget(InterfaceID.ToplevelOsrsStretch.STONE10) != null)
-		{
-			return InterfaceID.ToplevelOsrsStretch.STONE10;
-		}
-		return -1;
+		final int stone = Interfaces.stonesOnPreEoc(c) ? InterfaceID.ToplevelPreEoc.STONE10 : InterfaceID.ToplevelOsrsStretch.STONE10;
+		return c.getWidget(stone) != null ? stone : -1;
 	}
 
 	private static void rebuild(Client c)

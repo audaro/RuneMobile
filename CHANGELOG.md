@@ -27,6 +27,10 @@ as "What's new".
   inventory is too full" had shown, the next make box (chiselling amethyst, fletching, cooking) ignored taps, and
   so did the chat from then on; only the number keys worked. The app kept treating the closed
   message as still open and sent every tap to it.
+- A world hop after switching between Resizable - Modern and Resizable - Classic could press the logout tab of the
+  layout no longer on screen, and give up after a few seconds. It now uses the same layout as the tab buttons.
+- With the data orbs turned off, the map button could do nothing instead of saying why, and the notice about them
+  could stay quiet, when the game had loaded the orbs without the server showing them.
 
 ## [0.9.0] - 2026-11-07
 
