@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import kotlin.math.abs
 
 /** Game settings > Lower resolution when hot, and the hot-phone notice's Don't show again. Both default off. */
 object HeatSettings {
@@ -62,54 +63,55 @@ internal fun GsHeatSection() {
  * focus and never pauses anything. MainActivity decides when it shows.
  */
 internal object HeatNotice {
-    private const val WIDE_MIN_DP = 460 // narrower than this, the buttons go under the text
     private const val ACCENT = 0xFFF29E1C.toInt()
 
-    /** Where the card goes in a frame of [rootW] x [rootH] px, and whether it stacks its buttons. */
-    class Placement(
-        val params: FrameLayout.LayoutParams,
-        val compact: Boolean,
-    )
-
     /**
-     * Over the world, never over the game's own HUD. On a wide screen with the chat in the top half (the landscape
-     * layout) it goes just under the chat, lined up with it, which keeps it off the orbs and the minimap on the right. A
-     * narrow screen (portrait) has no room beside them, so it stacks its buttons and goes centred under the lowest of
-     * the chat, minimap and orbs at the top. With none of them at the top it sits top centre, where the layout switch
-     * would; the two are never up at the same time. [hud] gives a snapshot box ("chat", "minimap", "orbs") in the
-     * frame's px as [left, top, right, bottom], or null when it isn't showing. [insets] are the safe-area insets, L/T/R.
+     * Where the card goes: the lowest spot for a [w] x [h] box inside [area] that stays [gap] clear of every box in
+     * [blockers], and as near the middle across as the room there allows. It starts at the bottom of [area]; where
+     * something is in the way it moves up to just above it and looks again. Boxes are [left, top, right, bottom] in the
+     * frame's px. Gives the card's [left, top], or null when nothing fits anywhere. iOS's RMHeatNoticeSpot is the same
+     * walk.
      */
-    fun place(
-        rootW: Int,
-        rootH: Int,
-        insets: IntArray,
-        density: Float,
-        hud: (String) -> IntArray?,
-    ): Placement {
-        val gap = (6 * density).toInt()
-        val upper = { box: IntArray -> (box[1] + box[3]) / 2 < rootH / 2 }
-        val chat = hud("chat")?.takeIf(upper)
-        val room =
-            if (chat != null) {
-                rootW - insets[2] - (8 * density).toInt() - chat[0]
-            } else {
-                rootW - insets[0] - insets[2] - (24 * density).toInt()
-            }
-        val compact = room < WIDE_MIN_DP * density
-        val lp = FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT)
-        if (chat != null && !compact) {
-            lp.gravity = Gravity.TOP or Gravity.START
-            lp.leftMargin = chat[0]
-            lp.rightMargin = insets[2] + (8 * density).toInt()
-            lp.topMargin = chat[3] + gap
-        } else {
-            lp.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            lp.leftMargin = insets[0] + (12 * density).toInt()
-            lp.rightMargin = insets[2] + (12 * density).toInt()
-            val below = listOf("chat", "minimap", "orbs").mapNotNull(hud).filter(upper).maxOfOrNull { it[3] }
-            lp.topMargin = if (below != null) below + gap else insets[1] + (60 * density).toInt()
+    fun spot(
+        area: IntArray,
+        w: Int,
+        h: Int,
+        blockers: List<IntArray>,
+        gap: Int,
+    ): IntArray? {
+        var bottom = area[3]
+        var found: IntArray? = null
+        while (found == null && bottom - h >= area[1]) {
+            val top = bottom - h
+            val inBand = blockers.filter { it[1] - gap < bottom && it[3] + gap > top }
+            found = across(area, w, inBand, gap)?.let { intArrayOf(it, top) }
+            // Up to just clear of the lowest thing in the way. With nothing in the way and still no room, the area is
+            // narrower than the card, so that's the end of it.
+            bottom = if (inBand.isEmpty()) area[1] - 1 else inBand.maxOf { it[1] - gap }
         }
-        return Placement(lp, compact)
+        return found
+    }
+
+    /** The left edge for a [w]-wide card in a gap between [inBand]'s boxes across [area], nearest the middle, or null. */
+    private fun across(
+        area: IntArray,
+        w: Int,
+        inBand: List<IntArray>,
+        gap: Int,
+    ): Int? {
+        val mid = (area[0] + area[2]) / 2
+        val ranges = inBand.map { (it[0] - gap) to (it[2] + gap) }.sortedBy { it.first } + (area[2] to area[2])
+        var from = area[0]
+        var best: Int? = null
+        for ((start, end) in ranges) {
+            val to = minOf(start, area[2])
+            if (to - from >= w) {
+                val x = (mid - w / 2).coerceIn(from, to - w)
+                if (best == null || abs(x + w / 2 - mid) < abs(best + w / 2 - mid)) best = x
+            }
+            from = maxOf(from, end)
+        }
+        return best
     }
 
     /** The card. [compact] stacks the buttons under the text, for a narrow screen. */

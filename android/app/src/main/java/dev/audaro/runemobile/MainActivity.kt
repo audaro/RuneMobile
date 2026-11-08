@@ -24,6 +24,7 @@ import android.os.SystemClock
 import android.os.Vibrator
 import android.provider.MediaStore
 import android.util.Log
+import android.util.Size
 import android.view.Choreographer
 import android.view.GestureDetector
 import android.view.Gravity
@@ -59,12 +60,14 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.hypot
 
 /**
@@ -264,6 +267,8 @@ class MainActivity : AppCompatActivity() {
     private var heatNoticeOffered = false // it has been up this launch
     private var heatNoticeCalmSinceMs = 0L // logged in and out of combat since, 0 = not now
     private var heatNoticeShownMs = 0L
+    private var heatNoticeRootSize: Size? = null // the screen's size when it went up: its spot is for that shape
+    private val rootSize: Size? get() = rootContainer?.let { Size(it.width, it.height) }
     private var heatNoticeNextPollMs = 0L
     private var heatNoticePinned = false // DEBUG: up until a button or the broadcast takes it down, for a capture
     private var launcherSheet: View? = null // the plugin launcher, which the notice must never sit over
@@ -585,6 +590,12 @@ class MainActivity : AppCompatActivity() {
         private const val HEAT_NOTICE_POLL_MS = 250L
         private const val HEAT_NOTICE_CALM_MS = 10_000L // out of combat this long before the hot-phone notice may show
         private const val HEAT_NOTICE_SHOW_MS = 20_000L // then it goes by itself
+        private const val HEAT_NOTICE_MARGIN_DP = 8 // from the screen's safe edges, and from every control
+        private const val HEAT_NOTICE_FINGER_DP = 48 // a control smaller than this takes a touch this big around it
+        private const val HEAT_NOTICE_NARROW_DP = 280 // the narrow card, its text wrapped over its stacked buttons
+
+        // The game's HUD boxes in the chrome snapshot that the notice keeps off, besides the tab stones.
+        private val HEAT_NOTICE_HUD = listOf("chat", "minimap", "mapContainer", "orbs", "sideContainer", "sidePanel", "inv")
 
         // How long the server gets to apply a layout switch before the pill gives up and says how to do it by hand.
         private const val LAYOUT_SWITCH_TIMEOUT_MS = 15_000L
@@ -3301,6 +3312,8 @@ class MainActivity : AppCompatActivity() {
                 HeatSettings.lowerResolution(this) -> hideHeatNotice("turned on in Game settings")
                 now - heatNoticeShownMs >= HEAT_NOTICE_SHOW_MS -> hideHeatNotice("timed out")
                 !heatNoticeCalm() -> hideHeatNotice("a fight started or the screen changed")
+                heatNoticeRootSize != rootSize -> hideHeatNotice("the screen turned or changed size")
+                heatNoticeCovers() -> hideHeatNotice("a control came up under it")
             }
         } else if (heatNoticeWanted() && heatNoticeCalm()) {
             if (heatNoticeCalmSinceMs == 0L) heatNoticeCalmSinceMs = now
@@ -3331,28 +3344,41 @@ class MainActivity : AppCompatActivity() {
     private fun showHeatNotice() {
         val root = rootContainer ?: return
         heatNoticeOffered = true
-        val snap = runCatching { JSONObject(JvmLauncher.chromeSnapshotPub()) }.getOrNull()
-        val at =
-            HeatNotice.place(root.width, root.height, safeInsetsLTR(), resources.displayMetrics.density) { key ->
-                snap?.let { hudBoxInRoot(it, key) }
-            }
-        val card =
-            HeatNotice.card(
-                this,
-                at.compact,
-                onTurnOn = {
-                    HeatSettings.setLowerResolution(this, true)
-                    hideHeatNotice("turned on")
-                    Toast.makeText(this, "Lower resolution when hot is on", Toast.LENGTH_SHORT).show()
-                },
-                onNeverAgain = {
-                    HeatSettings.setNoticeOff(this, true)
-                    hideHeatNotice("don't show again")
-                },
-            )
+        val margin = (HEAT_NOTICE_MARGIN_DP * resources.displayMetrics.density).toInt()
+        val ins = safeInsetsIn(root)
+        val area = intArrayOf(ins[0] + margin, ins[1] + margin, root.width - ins[2] - margin, root.height - ins[3] - margin)
+        val blockers = heatNoticeBlockers()
+        // At the bottom of the screen, clear of every control: the game's HUD and every button of ours. The card is
+        // measured three ways: wide, with its buttons stacked, and stacked in a narrow column with the text wrapped. It
+        // takes whichever sits lowest, the wider on a tie. If nothing fits, there's no notice: it's never worth
+        // covering a control for.
+        val areaW = area[2] - area[0]
+        val narrow = minOf(areaW, (HEAT_NOTICE_NARROW_DP * resources.displayMetrics.density).toInt())
+        val pick =
+            listOf(false to areaW, true to areaW, true to narrow)
+                .mapNotNull { (compact, maxW) ->
+                    val card = HeatNotice.card(this, compact, ::onHeatNoticeTurnOn, ::onHeatNoticeNeverAgain)
+                    card.measure(
+                        View.MeasureSpec.makeMeasureSpec(maxW, View.MeasureSpec.AT_MOST),
+                        View.MeasureSpec.makeMeasureSpec(area[3] - area[1], View.MeasureSpec.AT_MOST),
+                    )
+                    HeatNotice.spot(area, card.measuredWidth, card.measuredHeight, blockers, margin)?.let { card to it }
+                }.maxByOrNull { (card, at) -> at[1] + card.measuredHeight }
+        if (pick == null) {
+            Log.i(TAG, "heat: hot-phone notice: no room clear of the controls, so none this launch")
+            return
+        }
+        val (card, at) = pick
+        val params =
+            FrameLayout
+                .LayoutParams(card.measuredWidth, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START)
+                .apply {
+                    leftMargin = at[0]
+                    topMargin = at[1]
+                }
         // Under the launcher and the cards above the game, over the game and its chrome.
         val index = if (::layoutSwitchButton.isInitialized) root.indexOfChild(layoutSwitchButton) + 1 else 0
-        root.addView(card, if (index > 0) index else -1, at.params)
+        root.addView(card, if (index > 0) index else -1, params)
         card.alpha = 0f
         card
             .animate()
@@ -3361,32 +3387,87 @@ class MainActivity : AppCompatActivity() {
             .start()
         heatNotice = card
         heatNoticeShownMs = SystemClock.uptimeMillis()
-        Log.i(TAG, "heat: hot-phone notice shown (compact=${at.compact}), offers Lower resolution when hot")
+        heatNoticeRootSize = rootSize
+        Log.i(
+            TAG,
+            "heat: hot-phone notice shown at ${at[0]},${at[1]} ${card.measuredWidth}x${card.measuredHeight} " +
+                "(clear of ${blockers.size} controls), offers Lower resolution when hot",
+        )
     }
 
-    /** A HUD box from the chrome snapshot in the root frame's px, [left, top, right, bottom], or null if it isn't up. */
-    private fun hudBoxInRoot(
-        snap: JSONObject,
-        key: String,
-    ): IntArray? {
-        val a = snap.optJSONArray(key)?.takeIf { it.length() >= 4 && it.optInt(2) > 0 && it.optInt(3) > 0 }
+    private fun onHeatNoticeTurnOn() {
+        HeatSettings.setLowerResolution(this, true)
+        hideHeatNotice("turned on")
+        Toast.makeText(this, "Lower resolution when hot is on", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun onHeatNoticeNeverAgain() {
+        HeatSettings.setNoticeOff(this, true)
+        hideHeatNotice("don't show again")
+    }
+
+    /** Everything the hot-phone notice mustn't cover, in the root frame's px [left, top, right, bottom]: the game's HUD
+     *  from the chrome snapshot (the chat, the minimap and orbs, the side panel and its tabs, the inventory), the tab
+     *  grid, the chat's tab row and the dialogue box as drawn, and every clickable view that shows. A small control
+     *  counts as a fingertip around its middle, the area a touch for it lands in. */
+    private fun heatNoticeBlockers(): List<IntArray> {
+        val root = rootContainer ?: return emptyList()
+        val out = ArrayList<IntArray>()
+        val snap = runCatching { JSONObject(JvmLauncher.chromeSnapshotPub()) }.getOrNull()
+        if (snap != null) {
+            HEAT_NOTICE_HUD.mapNotNullTo(out) { hudBoxInRoot(snap.optJSONArray(it)) }
+            snap.optJSONArray("tabs")?.let { t -> (0 until t.length()).mapNotNullTo(out) { hudBoxInRoot(t.optJSONArray(it)) } }
+        }
+        val rootAt = IntArray(2).also { root.getLocationInWindow(it) }
+        val stageAt = IntArray(2).also { chromeOverlay.getLocationInWindow(it) }
+        val views = ArrayList<RectF>()
+        chromeOverlay.keepOut(views)
+        chatTabOverlay.keepOut(views)
+        dialogueOverlay.keepOut(views)
+        views.forEach { it.offset((stageAt[0] - rootAt[0]).toFloat(), (stageAt[1] - rootAt[1]).toFloat()) }
+        collectClickable(root, views, rootAt, root.width.toFloat() * root.height / 4f)
+        val finger = HEAT_NOTICE_FINGER_DP * resources.displayMetrics.density
+        views.mapTo(out) { r ->
+            val dx = maxOf(0f, (finger - r.width()) / 2)
+            val dy = maxOf(0f, (finger - r.height()) / 2)
+            intArrayOf((r.left - dx).toInt(), (r.top - dy).toInt(), ceil(r.right + dx).toInt(), ceil(r.bottom + dy).toInt())
+        }
+        return out
+    }
+
+    private fun disarm(v: View) {
+        v.isClickable = false
+        if (v is ViewGroup) for (i in 0 until v.childCount) disarm(v.getChildAt(i))
+    }
+
+    /** Has anything come up under the notice since it was placed: a panel opened, a dialogue, a button shown? */
+    private fun heatNoticeCovers(): Boolean {
+        val v = heatNotice ?: return false
+        return heatNoticeBlockers().any { it[0] < v.right && v.left < it[2] && it[1] < v.bottom && v.top < it[3] }
+    }
+
+    /** A HUD box from the chrome snapshot, [x, y, w, h] in canvas px, in the root frame's px as [left, top, right,
+     *  bottom], or null if it isn't up. */
+    private fun hudBoxInRoot(a: JSONArray?): IntArray? {
+        val box = a?.takeIf { it.length() >= 4 && it.optInt(2) > 0 && it.optInt(3) > 0 }
         val stage = gameStage
         val fw = JvmLauncher.frameWidth()
         val fh = JvmLauncher.frameHeight()
-        if (a == null || stage == null || fw <= 0) return null
+        if (box == null || stage == null || fw <= 0) return null
         val sx = surfaceView.width.toFloat() / fw
         val sy = surfaceView.height.toFloat() / fh.coerceAtLeast(1)
         return intArrayOf(
-            stage.left + (a.optInt(0) * sx).toInt(),
-            stage.top + (a.optInt(1) * sy).toInt(),
-            stage.left + ((a.optInt(0) + a.optInt(2)) * sx).toInt(),
-            stage.top + ((a.optInt(1) + a.optInt(3)) * sy).toInt(),
+            stage.left + (box.optInt(0) * sx).toInt(),
+            stage.top + (box.optInt(1) * sy).toInt(),
+            stage.left + ((box.optInt(0) + box.optInt(2)) * sx).toInt(),
+            stage.top + ((box.optInt(1) + box.optInt(3)) * sy).toInt(),
         )
     }
 
     private fun hideHeatNotice(why: String) {
         val v = heatNotice ?: return
         heatNotice = null
+        disarm(v) // on its way out it takes no more taps: they go to whatever came up under it
         v
             .animate()
             .alpha(0f)
@@ -4525,16 +4606,16 @@ class MainActivity : AppCompatActivity() {
         return out
     }
 
-    /** Adds each clickable view under [v] that shows and covers less than [maxArea] view px², whole, in the game's
-     *  view px ([origin] is the game's corner in the window). The hold menu and the overlay editor are passed over:
-     *  a box moving off either would chase it. */
+    /** Adds each clickable view under [v] that shows and covers less than [maxArea] view px², whole, relative to
+     *  [origin], a corner in the window. The hold menu, the overlay editor and the hot-phone notice are passed over:
+     *  a box moving off any of them would chase it. */
     private fun collectClickable(
         v: View,
         out: MutableList<RectF>,
         origin: IntArray,
         maxArea: Float,
     ) {
-        if (v === menuOverlay || v === overlayEditView) return
+        if (v === menuOverlay || v === overlayEditView || v === heatNotice) return
         if (v.visibility != View.VISIBLE || v.alpha < 0.01f) return
         if (v.isClickable && v.width.toFloat() * v.height < maxArea) {
             val r = android.graphics.Rect()
