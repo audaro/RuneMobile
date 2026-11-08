@@ -6051,6 +6051,17 @@ static const CGFloat kHeatNoticeNarrow = 280; // the narrow card, its text wrapp
             [RMGameSettings setHeatNoticeOff:YES];
             [ws hideHeatNotice:@"don't show again"];
         }];
+    // The checks in updateHeatNotice run a few times a second, so a control can come up under the card between
+    // two of them. A touch on a button checks again: if anything is under it now, the touch goes to that instead
+    // and the card goes, after the hit test rather than in the middle of it.
+    v.takesTouch = ^BOOL {
+        if (![ws heatNoticeInTheWay])
+            return YES;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [ws hideHeatNotice:@"a control came up under it as it was touched"];
+        });
+        return NO;
+    };
     // At the bottom of the screen, clear of every control: the game's HUD and every button of ours. The card is
     // measured three ways: wide, with its buttons stacked, and stacked in a narrow column with the text wrapped. It
     // takes whichever sits lowest, the wider on a tie. If nothing fits, there's no notice: it's never worth covering a
@@ -6137,6 +6148,11 @@ static const CGFloat kHeatNoticeNarrow = 280; // the narrow card, its text wrapp
     for (NSUInteger i = 0; i < blockers.count; i++)
         rects[i] = blockers[i].CGRectValue;
     return RMHeatNoticeSpot(area, size, rects, blockers.count, kHeatNoticeMargin, origin);
+}
+
+// Has the screen turned since the notice was placed, or a control come up under it?
+- (BOOL)heatNoticeInTheWay {
+    return !CGSizeEqualToSize(self.view.bounds.size, self.heatNoticePlacedIn) || [self heatNoticeCovers];
 }
 
 // Has anything come up under the notice since it was placed: a panel opened, a dialogue, a button shown?
