@@ -941,6 +941,13 @@ static id parseBridgeJSON(NSString *snap, const char *site) {
 
 #pragma mark - RMSettingsViewController (the ⚙ sheet)
 
+#if DEBUG
+// Debug builds only: Settings > Developer > Picture-in-Picture. Off skips setupPictureInPicture from the next launch,
+// so every renderer draws the way the simulator does: no AVSampleBufferDisplayLayer, no PiP controller, the
+// keepalive audio unchanged. It separates a leak in Apple's video pipeline from one anywhere else in the app.
+static NSString *const kRMDebugPipOffKey = @"RMDebugPipOff";
+#endif
+
 // A small grouped settings screen presented from the gear. It owns no state — every row is wired to a block
 // the host supplies, so it stays decoupled from ViewController's private methods. Developer mode is a plain
 // switch here; flipping it reveals/hides the dev rows (debug panel) in place.
@@ -1010,7 +1017,7 @@ static id parseBridgeJSON(NSString *snap, const char *site) {
         case 2:
             return 2 + (NSInteger)[self pluginExtraRows].count; // Plugin panels + Show plugin rail (+ profiles/infoboxes)
         case 3:
-            return self.developerMode ? 2 : 1; // Developer mode (+ debug panel)
+            return self.developerMode ? [self developerRows] : 1; // Developer mode (+ debug panel, PiP in Debug)
         default:
             return 0;
     }
@@ -1036,9 +1043,18 @@ static id parseBridgeJSON(NSString *snap, const char *site) {
         return @"Pick which keys and buttons sit on your screen. Start fresh, add only what you use.";
     if (s == 3)
         return self.developerMode
-                   ? @"Diagnostic tools. Leave off for normal play."
+                   ? @"Diagnostic tools. Normal play leaves them as they are."
                    : @"Turn on to reveal the debug panel.";
     return nil;
+}
+
+// Developer mode, Show debug panel, and in Debug builds the Picture-in-Picture switch.
+- (NSInteger)developerRows {
+#if DEBUG
+    return 3;
+#else
+    return 2;
+#endif
 }
 
 - (UISwitch *)switchOn:(BOOL)on action:(SEL)sel {
@@ -1095,11 +1111,20 @@ static id parseBridgeJSON(NSString *snap, const char *site) {
             cell.textLabel.text = @"Developer mode";
             cell.accessoryView = [self switchOn:self.developerMode action:@selector(onDeveloper:)];
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        } else {
+        } else if (ip.row == 1) {
             cell.textLabel.text = @"Show debug panel";
             cell.accessoryView = [self switchOn:self.debugOn action:@selector(onDebug:)];
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
         }
+#if DEBUG
+        else {
+            cell.textLabel.text = @"Picture-in-Picture";
+            cell.detailTextLabel.text = @"Off from the next launch: the game draws without the video layer";
+            cell.accessoryView = [self switchOn:![[NSUserDefaults standardUserDefaults] boolForKey:kRMDebugPipOffKey]
+                                         action:@selector(onPip:)];
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        }
+#endif
     }
     return cell;
 }
@@ -1140,6 +1165,11 @@ static id parseBridgeJSON(NSString *snap, const char *site) {
     if (self.onToggleDebug)
         self.onToggleDebug(sw.on);
 }
+#if DEBUG
+- (void)onPip:(UISwitch *)sw {
+    [[NSUserDefaults standardUserDefaults] setBool:!sw.on forKey:kRMDebugPipOffKey];
+}
+#endif
 - (void)onDeveloper:(UISwitch *)sw {
     self.developerMode = sw.on;
     // Disabling dev mode hides the debug panel host-side (applyDeveloperMode), so mirror that here — otherwise
@@ -8165,6 +8195,12 @@ static CGRect mapRectFromArr(NSArray *a) {
 // state and renders nothing, the image simply shows through.
 - (void)setupPictureInPicture {
     if (self.pipController) return;
+#if DEBUG
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:kRMDebugPipOffKey]) {
+        [self appendLine:@"[pip] OFF (Settings > Developer > Picture-in-Picture): no video layer this launch"];
+        return;
+    }
+#endif
     if (![AVPictureInPictureController isPictureInPictureSupported]) {
         [self appendLine:@"[pip] not supported on this device"];
         return;
