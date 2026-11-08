@@ -120,20 +120,14 @@ log "xcodegen generate"
 # StikDebug attach / JIT under Release is device-unverified — confirm on-device before relying on it.
 CONFIG="${CONFIG:-Debug}"
 case "$CONFIG" in Debug|Release) ;; *) die "CONFIG must be Debug or Release (got '$CONFIG')" ;; esac
-# Unlock the build keychain the way tools/ci/build-release-artifacts.sh does. If it is locked, codesign asks for
-# its password in a dialog on the Mac's screen and waits there, with no output, which nobody can answer from
-# away from the Mac (2026-11-08: a 30-minute silent stall).
-BUILD_KC="$HOME/Library/Keychains/build.keychain-db"
-KC_PW="${CI_CONFIG_DIR:-$HOME/.runemobile-ci}/keychain.pw"
-if [ -f "$BUILD_KC" ] && [ -f "$KC_PW" ]; then
-  security unlock-keychain -p "$(cat "$KC_PW")" "$BUILD_KC" || die "could not unlock $BUILD_KC with $KC_PW"
-  # codesign only looks in the search list. Put the build keychain first if it is missing, keeping the others.
-  if ! security list-keychains -d user | grep -qF "$BUILD_KC"; then
-    KCS=(); while IFS= read -r k; do k="${k#"${k%%[![:space:]]*}"}"; KCS+=("${k//\"/}"); done < <(security list-keychains -d user)
-    security list-keychains -d user -s "$BUILD_KC" "${KCS[@]}" || die "could not add $BUILD_KC to the keychain search list"
-  fi
-elif [ -f "$BUILD_KC" ]; then
-  printf '\033[1;33m!! no %s: if %s is locked, codesign waits for its password\n   in a dialog on the Mac screen and the build goes quiet\033[0m\n' "$KC_PW" "$BUILD_KC" >&2
+# Signing uses the login keychain. The release script (tools/ci/build-release-artifacts.sh) puts its own build
+# keychain first in the user's keychain search list, and that setting outlives the script. Left there, codesign
+# picks the identity out of the build keychain, finds it locked, and waits for its password in a dialog on the
+# Mac's screen with no output (2026-11-08: a 30-minute silent stall). Stop with the fix instead of changing a
+# setting that belongs to the whole account.
+if security list-keychains -d user | grep -qF "/build.keychain-db"; then
+  die "build.keychain-db is in the keychain search list, so codesign would wait on a password dialog. Put the
+   list back and rerun:  security list-keychains -d user -s \"\$HOME/Library/Keychains/login.keychain-db\""
 fi
 log "xcodebuild RuneMobile $VERSTR ($CONFIG, generic/iOS, signed)"
 xcodebuild -project "$APPDIR/RuneMobile.xcodeproj" -scheme RuneMobile -configuration "$CONFIG" \
