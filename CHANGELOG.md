@@ -19,7 +19,8 @@ as "What's new".
   until the phone cooled, so a higher setting looked like it didn't save. Lowering it is now your choice: Game
   settings > Lower resolution when hot. When the phone gets hot on 117 HD, a small notice offers to turn it on, at
   most once each time you open the app, and has a Don't show again button. It waits until you're out of combat,
-  stays clear of the game's controls, and only its two buttons take a tap.
+  sits at the bottom of the screen without covering any button, and goes as soon as a fight starts or something
+  opens under it. Only its two buttons take a tap.
 
 ## [0.9.0] - 2026-11-07
 
