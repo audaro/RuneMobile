@@ -686,6 +686,37 @@ static JNIEXPORT void JNICALL rc_GL_glReadPixels_0(JNIEnv *env, jclass cls, jint
     glReadPixels((GLint)a0,(GLint)a1,(GLsizei)a2,(GLsizei)a3,(GLenum)a4,(GLenum)a5,(*env)->GetDirectBufferAddress(env,a6));
 }
 
+// GpuPlugin.screenshot() (the Screenshot plugin's level-ups, drops, deaths, and any plugin that asks DrawManager for
+// a frame) reads the finished frame into a BufferedImage's int[] as GL_BGRA / GL_UNSIGNED_INT_8_8_8_8_REV: one
+// 0xAARRGGBB word per pixel. GLES reads only GL_RGBA / GL_UNSIGNED_BYTE (0xAABBGGRR on little-endian), so read that
+// and swap R and B on the way out; the plugin flips the rows itself. It runs after swapBuffers, whose readback left
+// our offscreen FBO bound for reading, with the frame still in it. Unbound, this overload threw UnsatisfiedLinkError
+// on the client thread at the first screenshot. The scratch lives only for the call: screenshots are rare, and a
+// frame-sized buffer kept for good would be ~4 MB held for nothing.
+static JNIEXPORT void JNICALL rc_GL_glReadPixels_1(JNIEnv *env, jclass cls, jint a0, jint a1, jint a2, jint a3, jint a4, jint a5, jintArray a6) {
+    if (!a6 || a2 <= 0 || a3 <= 0)
+        return;
+    const size_t n = (size_t)a2 * (size_t)a3;
+    if ((size_t)(*env)->GetArrayLength(env, a6) < n)
+        return;
+    const BOOL bgra = (GLenum)a4 == GL_BGRA && (GLenum)a5 == GL_UNSIGNED_INT_8_8_8_8_REV;
+    if (!bgra && !((GLenum)a4 == GL_RGBA && (GLenum)a5 == GL_UNSIGNED_BYTE)) {
+        fprintf(stderr, "[routec] glReadPixels(int[]): format 0x%x type 0x%x has no GLES read here; array left as is\n", a4, a5);
+        return;
+    }
+    uint32_t *px = (uint32_t *)malloc(n * sizeof(uint32_t));
+    if (!px)
+        return;
+    glReadPixels((GLint)a0, (GLint)a1, (GLsizei)a2, (GLsizei)a3, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    if (bgra)
+        for (size_t i = 0; i < n; i++) {
+            const uint32_t p = px[i];                                              // 0xAABBGGRR
+            px[i] = (p & 0xFF00FF00u) | ((p & 0xFFu) << 16) | ((p >> 16) & 0xFFu); // -> 0xAARRGGBB
+        }
+    (*env)->SetIntArrayRegion(env, a6, 0, (jsize)n, (const jint *)px);
+    free(px);
+}
+
 static JNIEXPORT void JNICALL rc_GL_glRenderbufferStorageMultisample_0(JNIEnv *env, jclass cls, jint a0, jint a1, jint a2, jint a3, jint a4)
 {
     // ES 3.0 renderbuffers require a SIZED internal format; the plugin passes GL_RGBA (unsized, desktop-legal).
@@ -1059,6 +1090,7 @@ static jobject rc_make_caps(JNIEnv *env)
 static JNIEXPORT jobject JNICALL rc_GL_createCapabilities_0(JNIEnv *env, jclass cls) { rc_trace(@"[routec] GL.createCapabilities (past createGLContext; OpenGL33=true returned)"); return rc_make_caps(env); }
 static JNIEXPORT jobject JNICALL rc_GL_getCapabilities_0(JNIEnv *env, jclass cls) { return rc_make_caps(env); }
 
+// clang-format off
 static const JNINativeMethod kGLALL[] = {
     { "glActiveTexture", "(I)V", (void *)&rc_GL_glActiveTexture_0 },
     { "glAttachShader", "(II)V", (void *)&rc_GL_glAttachShader_0 },
@@ -1121,6 +1153,7 @@ static const JNINativeMethod kGLALL[] = {
     { "glMultiDrawArrays", "(ILjava/nio/IntBuffer;Ljava/nio/IntBuffer;)V", (void *)&rc_GL_glMultiDrawArrays_0 },
     { "glReadBuffer", "(I)V", (void *)&rc_GL_glReadBuffer_0 },
     { "glReadPixels", "(IIIIIILjava/nio/ByteBuffer;)V", (void *)&rc_GL_glReadPixels_0 },
+    { "glReadPixels", "(IIIIII[I)V", (void *)&rc_GL_glReadPixels_1 },
     { "glRenderbufferStorageMultisample", "(IIIII)V", (void *)&rc_GL_glRenderbufferStorageMultisample_0 },
     { "glShaderSource", "(ILjava/lang/CharSequence;)V", (void *)&rc_GL_glShaderSource_0 },
     { "glTexImage2D", "(IIIIIIIIJ)V", (void *)&rc_GL_glTexImage2D_0 },
@@ -1162,6 +1195,7 @@ static const JNINativeMethod kGL[] = {
     { "createCapabilities", "()Lorg/lwjgl/opengl/GLCapabilities;", (void *)&rc_GL_createCapabilities_0 },
     { "getCapabilities", "()Lorg/lwjgl/opengl/GLCapabilities;", (void *)&rc_GL_getCapabilities_0 },
 };
+// clang-format on
 
 // Call once after JNI_CreateJavaVM, before the gpu plugin starts.
 jint RouteC_registerGLNatives(JNIEnv *env)

@@ -95,6 +95,11 @@ extern void glClipControlEXT(GLenum origin, GLenum depth);
 #import <OpenGLES/ES3/gl.h>
 #import <OpenGLES/ES3/glext.h>
 #import <QuartzCore/QuartzCore.h>    // CAEAGLLayer (EAGL direct present). Safe here — no GLES3 headers in this branch.
+// Desktop GL's packed type, which LWJGL passes for GpuPlugin.screenshot()'s int[] glReadPixels. The ES headers have
+// GL_BGRA (glext.h, 0x80E1) but not this; the ANGLE branch above defines both for its texture shims.
+#ifndef GL_UNSIGNED_INT_8_8_8_8_REV
+#define GL_UNSIGNED_INT_8_8_8_8_REV 0x8367
+#endif
 
 #endif
 

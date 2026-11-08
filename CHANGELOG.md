@@ -27,6 +27,8 @@ as "What's new".
   inventory is too full" had shown, the next make box (chiselling amethyst, fletching, cooking) ignored taps, and
   so did the chat from then on; only the number keys worked. The app kept treating the closed
   message as still open and sent every tap to it.
+- iOS, GPU renderer: taking a screenshot (the Screenshot plugin takes one on a level-up) failed with an error from
+  the game's main loop, which could stop the game. Android had the same fix earlier.
 - A world hop after switching between Resizable - Modern and Resizable - Classic could press the logout tab of the
   layout no longer on screen, and give up after a few seconds. It now uses the same layout as the tab buttons.
 - With the data orbs turned off, the map button could do nothing instead of saying why, and the notice about them

@@ -70,6 +70,7 @@ org/lwjgl/opengl/GL33C.glMapBufferRange:(IJJILjava/nio/ByteBuffer;)Ljava/nio/Byt
 org/lwjgl/opengl/GL33C.glMultiDrawArrays:(ILjava/nio/IntBuffer;Ljava/nio/IntBuffer;)V
 org/lwjgl/opengl/GL33C.glReadBuffer:(I)V
 org/lwjgl/opengl/GL33C.glReadPixels:(IIIIIILjava/nio/ByteBuffer;)V
+org/lwjgl/opengl/GL33C.glReadPixels:(IIIIII[I)V
 org/lwjgl/opengl/GL33C.glRenderbufferStorageMultisample:(IIIII)V
 org/lwjgl/opengl/GL33C.glShaderSource:(ILjava/lang/CharSequence;)V
 org/lwjgl/opengl/GL33C.glTexImage2D:(IIIIIIIIJ)V
