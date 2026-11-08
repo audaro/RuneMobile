@@ -21,6 +21,9 @@ as "What's new".
   most once each time you open the app, and has a Don't show again button. It waits until you're out of combat,
   sits at the bottom of the screen without covering any button, and goes as soon as a fight starts or something
   opens under it. Only its two buttons take a tap.
+- iOS, Share logs: the memory section now also counts how many allocations the app holds, how much Java keeps in
+  native buffers, and which memory pools are growing, so a report after the app is closed for memory says more about
+  what filled it.
 
 ### Fixed
 - **"How many would you like to make?" boxes can be tapped after a message box.** Once a message like "Your

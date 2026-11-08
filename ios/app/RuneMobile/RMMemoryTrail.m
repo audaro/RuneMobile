@@ -6,18 +6,26 @@
 #import <malloc/malloc.h>
 #import <os/proc.h>
 #import <time.h>
+#if DEBUG
+#import <dlfcn.h>
+#import <objc/runtime.h>
+#endif
 
 static const uint64_t kIntervalSec = 60;
 // A little under the interval, so a sleep that wakes a moment early doesn't skip a line.
 static const uint64_t kMinGapSec = 55;
-// Six hours. Whole-file writes of this much once a minute cost nothing, and an atomic replace can't leave a half line.
-static const NSUInteger kKeepLines = 360;
+// A sample is its "t=" line plus the indented lines under it. Six hours of them: whole-file writes of this much once a
+// minute cost nothing, and an atomic replace can't leave a half line.
+static const NSUInteger kKeepSamples = 360;
 // A report carries the last two hours of a trail: enough to see a climb, without burying the rest of the file.
-static const NSUInteger kReportLines = 120;
+static const NSUInteger kReportSamples = 120;
 // A launch that dies inside five minutes says nothing about a slow climb, so it doesn't push out the one before it.
-static const NSUInteger kLinesWorthKeeping = 5;
+static const NSUInteger kSamplesWorthKeeping = 5;
+// The zones line leaves out zones holding less than this.
+static const size_t kZoneFloorBytes = 1 << 20;
 
 static NSMutableArray<NSString *> *sLines; // sLines[0] says when the session started
+static NSUInteger sSamples;                // the "t=" lines in sLines
 static uint64_t sStartNs;
 static uint64_t sLastNs;
 
@@ -27,6 +35,17 @@ static NSString *TrailPath(void) {
 
 static NSString *PreviousPath(void) {
     return [TrailPath() stringByAppendingString:@".prev"];
+}
+
+static BOOL IsSample(NSString *line) {
+    return [line hasPrefix:@"t="];
+}
+
+static NSUInteger SamplesIn(NSArray<NSString *> *lines) {
+    NSUInteger n = 0;
+    for (NSString *l in lines)
+        n += IsSample(l);
+    return n;
 }
 
 static NSArray<NSString *> *LinesOf(NSString *path) {
@@ -56,10 +75,228 @@ static int ThreadCount(void) {
     return (int)count;
 }
 
+// A block count to read at a glance: 950k, or the number itself under ten thousand.
+static NSString *Blocks(uint64_t n) {
+    return n >= 10000 ? [NSString stringWithFormat:@"%lluk", (n + 500) / 1000] : [NSString stringWithFormat:@"%llu", n];
+}
+
+// malloc's introspection calls read through a reader, written for a tool in another process. In this one the memory is
+// already here.
+static kern_return_t SelfReader(task_t task, vm_address_t address, vm_size_t size, void **local) {
+    (void)task;
+    (void)size;
+    *local = (void *)address;
+    return KERN_SUCCESS;
+}
+
+// MB/blocks for every zone holding a megabyte or more. Most of the process shares the default zones (the JVM, our own
+// code, most of the frameworks), so a zone of its own climbing names who is allocating.
+static NSString *ZonesLine(void) {
+    vm_address_t *zones = NULL;
+    unsigned count = 0;
+    if (malloc_get_all_zones(mach_task_self(), SelfReader, &zones, &count) != KERN_SUCCESS)
+        return @"   zones (unreadable)";
+    NSMutableString *line = [NSMutableString stringWithString:@"   zones"];
+    for (unsigned i = 0; i < count; i++) {
+        malloc_zone_t *zone = (malloc_zone_t *)zones[i];
+        malloc_statistics_t st = {0};
+        malloc_zone_statistics(zone, &st);
+        if (st.size_in_use < kZoneFloorBytes)
+            continue;
+        const char *name = malloc_get_zone_name(zone);
+        [line appendFormat:@" %s %zu/%@", name ?: "unnamed", st.size_in_use >> 20, Blocks(st.blocks_in_use)];
+    }
+    return line;
+}
+
+#if DEBUG
+// What the live blocks are, from a walk of every block in malloc's own zones. Debug builds only until a phone run
+// shows what a walk costs: each zone is locked while it is walked, so every malloc in it waits. The recorder only
+// counts into memory set aside beforehand, because a malloc in a zone this thread holds would never return. Other
+// zones (WebKit's, say) still show in the zones line; their walkers aren't written for a reader in their own process.
+//   sizes   MB/blocks by block size, every minute
+//   objc    the classes holding the most bytes, every fifth minute, matched by the class pointer at the start of a
+//           block. Not exact: a raw buffer that happens to start with a class's address counts as that class.
+static const vm_size_t kBucketTop[] = {256, 1024, 4096, 16384, 65536, 262144, 1048576, (vm_size_t)-1};
+static const char *const kBucketName[] = {"<=256", "<=1K", "<=4K", "<=16K", "<=64K", "<=256K", "<=1M", ">1M"};
+enum { kBuckets = sizeof kBucketTop / sizeof kBucketTop[0],
+       kTopClasses = 10 };
+static const uint64_t kClassEveryMin = 5;
+
+typedef struct {
+    uint64_t bytes[kBuckets];
+    uint64_t blocks[kBuckets];
+    BOOL classes;
+} Census;
+
+// Every class the runtime knows, in an open-addressed table at most half full; a block's counts go to its class's slot.
+static uintptr_t *sClassSlots;
+static uint64_t *sClassBytes;
+static uint64_t *sClassBlocks;
+static size_t sClassMask;
+static uintptr_t sIsaMask;
+
+static inline size_t SlotHash(uintptr_t p) {
+    return (size_t)(((uint64_t)p * 0x9E3779B97F4A7C15ull) >> 29);
+}
+
+static inline long SlotOf(uintptr_t cls) {
+    for (size_t i = SlotHash(cls) & sClassMask;; i = (i + 1) & sClassMask) {
+        if (sClassSlots[i] == cls)
+            return (long)i;
+        if (sClassSlots[i] == 0)
+            return -1;
+    }
+}
+
+// Once. objc_copyClassList realizes every class in the process, which costs a one-off step in malloc and some time.
+static NSString *IndexClasses(void) {
+    uint64_t t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+    unsigned n = 0;
+    Class *list = objc_copyClassList(&n);
+    size_t slots = 1;
+    while (slots < (size_t)n * 2)
+        slots <<= 1;
+    sClassSlots = list ? calloc(slots, sizeof *sClassSlots) : NULL;
+    sClassBytes = calloc(slots, sizeof *sClassBytes);
+    sClassBlocks = calloc(slots, sizeof *sClassBlocks);
+    if (!sClassSlots || !sClassBytes || !sClassBlocks) {
+        free(list);
+        free(sClassSlots);
+        free(sClassBytes);
+        free(sClassBlocks);
+        sClassSlots = NULL;
+        return @"class index failed";
+    }
+    sClassMask = slots - 1;
+    for (unsigned i = 0; i < n; i++) {
+        uintptr_t cls = (uintptr_t)list[i];
+        size_t j = SlotHash(cls) & sClassMask;
+        while (sClassSlots[j] != 0 && sClassSlots[j] != cls)
+            j = (j + 1) & sClassMask;
+        sClassSlots[j] = cls;
+    }
+    free(list);
+    // The runtime exports the mask that strips a non-pointer isa down to its class; the fallbacks are objc4's.
+    const uintptr_t *mask = dlsym(RTLD_DEFAULT, "objc_debug_isa_class_mask");
+#if TARGET_OS_SIMULATOR
+    sIsaMask = mask ? *mask : 0x007ffffffffffff8ull;
+#else
+    sIsaMask = mask ? *mask : 0x0000000ffffffff8ull;
+#endif
+    return [NSString stringWithFormat:@"indexed %u classes in %llu ms", n,
+                                      (clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - t0) / NSEC_PER_MSEC];
+}
+
+static void CountRanges(task_t task, void *context, unsigned type, vm_range_t *ranges, unsigned count) {
+    (void)task;
+    (void)type;
+    Census *c = context;
+    for (unsigned i = 0; i < count; i++) {
+        vm_size_t size = ranges[i].size;
+        unsigned b = 0;
+        while (size > kBucketTop[b])
+            b++;
+        c->bytes[b] += size;
+        c->blocks[b]++;
+        if (c->classes && size >= sizeof(uintptr_t)) {
+            uintptr_t cls = *(const uintptr_t *)ranges[i].address & sIsaMask;
+            long slot = cls ? SlotOf(cls) : -1;
+            if (slot >= 0) {
+                sClassBytes[slot] += size;
+                sClassBlocks[slot]++;
+            }
+        }
+    }
+}
+
+static BOOL IsMallocsOwnZone(const char *name) {
+    return name && (!strcmp(name, "DefaultMallocZone") || !strcmp(name, "MallocHelperZone") ||
+                    !strcmp(name, "DefaultPurgeableMallocZone"));
+}
+
+// The walk's lines, after the sample line; minute picks whether the classes are counted this time.
+static NSArray<NSString *> *CensusLines(uint64_t minute) {
+    static NSString *indexNote;
+    static BOOL noted;
+    // From the third minute, once boot is over, then every fifth. Two samples can round to the same minute, so this
+    // counts from the last census rather than matching minute numbers.
+    static uint64_t classesDue = 3;
+    Census c = {{0}, {0}, NO};
+    if (minute >= classesDue) {
+        classesDue = minute + kClassEveryMin;
+        if (!sClassSlots && !indexNote)
+            indexNote = IndexClasses();
+        if (sClassSlots) {
+            memset(sClassBytes, 0, (sClassMask + 1) * sizeof *sClassBytes);
+            memset(sClassBlocks, 0, (sClassMask + 1) * sizeof *sClassBlocks);
+            c.classes = YES;
+        }
+    }
+    vm_address_t *all = NULL;
+    unsigned count = 0;
+    if (malloc_get_all_zones(mach_task_self(), SelfReader, &all, &count) != KERN_SUCCESS)
+        return @[ @"   sizes (zones unreadable)" ];
+    malloc_zone_t *zones[16];
+    unsigned walk = 0;
+    for (unsigned i = 0; i < count && walk < 16; i++) {
+        malloc_zone_t *zone = (malloc_zone_t *)all[i];
+        malloc_introspection_t *in = zone->introspect;
+        if (IsMallocsOwnZone(malloc_get_zone_name(zone)) && in && in->enumerator && in->force_lock && in->force_unlock)
+            zones[walk++] = zone;
+    }
+    uint64_t t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW), worst = 0;
+    for (unsigned i = 0; i < walk; i++) {
+        uint64_t z0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+        malloc_introspection_t *in = zones[i]->introspect;
+        in->force_lock(zones[i]);
+        in->enumerator(mach_task_self(), &c, MALLOC_PTR_IN_USE_RANGE_TYPE, (vm_address_t)zones[i], SelfReader,
+                       CountRanges);
+        in->force_unlock(zones[i]);
+        worst = MAX(worst, clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - z0);
+    }
+    uint64_t took = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - t0;
+
+    NSMutableString *sizes = [NSMutableString stringWithString:@"   sizes"];
+    for (unsigned b = 0; b < kBuckets; b++)
+        [sizes appendFormat:@" %s %.1f/%@", kBucketName[b], c.bytes[b] / 1048576.0, Blocks(c.blocks[b])];
+    [sizes appendFormat:@" (walked %u zones in %llu ms, longest lock %llu ms)", walk, took / NSEC_PER_MSEC,
+                        worst / NSEC_PER_MSEC];
+    NSMutableArray<NSString *> *lines = [NSMutableArray arrayWithObject:sizes];
+    if (c.classes) {
+        NSMutableString *objc = [NSMutableString stringWithString:@"   objc"];
+        size_t picked[kTopClasses];
+        for (unsigned k = 0; k < kTopClasses; k++) {
+            size_t best = SIZE_MAX;
+            for (size_t i = 0; i <= sClassMask; i++) {
+                if (!sClassBytes[i] || (best != SIZE_MAX && sClassBytes[i] <= sClassBytes[best]))
+                    continue;
+                BOOL dup = NO;
+                for (unsigned j = 0; j < k && !dup; j++)
+                    dup = picked[j] == i;
+                if (!dup)
+                    best = i;
+            }
+            if (best == SIZE_MAX)
+                break;
+            picked[k] = best;
+            [objc appendFormat:@" %s %.1f/%@", class_getName((__bridge Class)(void *)sClassSlots[best]), sClassBytes[best] / 1048576.0,
+                               Blocks(sClassBlocks[best])];
+        }
+        [lines addObject:objc];
+    }
+    if (indexNote && !noted) {
+        [lines addObject:[@"   objc " stringByAppendingString:indexNote]];
+        noted = YES;
+    }
+    return lines;
+}
+#endif
+
 void RMMemoryTrailStart(void) {
     NSString *current = TrailPath();
     NSFileManager *fm = [NSFileManager defaultManager];
-    if (LinesOf(current).count > kLinesWorthKeeping) {
+    if (SamplesIn(LinesOf(current)) > kSamplesWorthKeeping) {
         [fm removeItemAtPath:PreviousPath() error:NULL];
         [fm moveItemAtPath:current toPath:PreviousPath() error:NULL];
     }
@@ -72,11 +309,12 @@ void RMMemoryTrailStart(void) {
                                                                         [f stringFromDate:[NSDate date]],
                                                                         [b objectForInfoDictionaryKey:@"CFBundleShortVersionString"],
                                                                         renderer]];
+    sSamples = 0;
     sStartNs = clock_gettime_nsec_np(CLOCK_MONOTONIC);
     Write();
 }
 
-void RMMemoryTrailSample(long heapUsedMB, long heapCommittedMB) {
+void RMMemoryTrailSample(long heapUsedMB, long heapCommittedMB, long directMB) {
     uint64_t now = clock_gettime_nsec_np(CLOCK_MONOTONIC);
     if (!sLines || (sLastNs && now - sLastNs < kMinGapSec * NSEC_PER_SEC))
         return;
@@ -92,12 +330,25 @@ void RMMemoryTrailSample(long heapUsedMB, long heapCommittedMB) {
     malloc_statistics_t zones = {0};
     malloc_zone_statistics(NULL, &zones);
     NSString *heap = heapCommittedMB < 0 ? @"-" : [NSString stringWithFormat:@"%ld/%ld", heapUsedMB, heapCommittedMB];
-    [sLines addObject:[NSString stringWithFormat:@"t=%llum fp=%llu free=%zu gfx=%llu media=%llu malloc=%zu heap=%@ threads=%d",
-                                                 (now - sStartNs + 30 * NSEC_PER_SEC) / (60 * NSEC_PER_SEC), vm.phys_footprint >> 20,
-                                                 os_proc_available_memory() >> 20, gfx >> 20, media >> 20,
-                                                 zones.size_in_use >> 20, heap, ThreadCount()]];
-    if (sLines.count > kKeepLines + 1)
+    NSString *direct = directMB < 0 ? @"-" : [NSString stringWithFormat:@"%ld", directMB];
+    uint64_t minute = (now - sStartNs + 30 * NSEC_PER_SEC) / (60 * NSEC_PER_SEC);
+    [sLines addObject:[NSString stringWithFormat:@"t=%llum fp=%llu free=%zu gfx=%llu media=%llu malloc=%zu blocks=%@ heap=%@ "
+                                                 @"direct=%@ threads=%d",
+                                                 minute, vm.phys_footprint >> 20, os_proc_available_memory() >> 20,
+                                                 gfx >> 20, media >> 20, zones.size_in_use >> 20,
+                                                 Blocks(zones.blocks_in_use), heap, direct, ThreadCount()]];
+    [sLines addObject:ZonesLine()];
+#if DEBUG
+    [sLines addObjectsFromArray:CensusLines(minute)];
+#endif
+    sSamples++;
+    while (sSamples > kKeepSamples) {
+        // The oldest sample goes with the indented lines under it.
         [sLines removeObjectAtIndex:1];
+        while (sLines.count > 1 && !IsSample(sLines[1]))
+            [sLines removeObjectAtIndex:1];
+        sSamples--;
+    }
     Write();
 }
 
@@ -108,10 +359,13 @@ NSString *RMMemoryTrailReport(void) {
         if (!lines.count)
             continue;
         [out appendFormat:@"%@\n", lines.firstObject];
-        NSUInteger samples = lines.count - 1;
-        if (samples > kReportLines)
-            [out appendFormat:@"(last %lu of %lu lines)\n", (unsigned long)kReportLines, (unsigned long)samples];
-        NSUInteger first = lines.count - MIN(samples, kReportLines);
+        NSUInteger samples = SamplesIn(lines), first = 1;
+        if (samples > kReportSamples) {
+            [out appendFormat:@"(last %lu of %lu samples)\n", (unsigned long)kReportSamples, (unsigned long)samples];
+            // Skip to the first sample the report keeps.
+            for (NSUInteger skip = samples - kReportSamples; skip > 0 || !IsSample(lines[first]); first++)
+                skip -= IsSample(lines[first]);
+        }
         for (NSUInteger i = first; i < lines.count; i++)
             [out appendFormat:@"%@\n", lines[i]];
     }

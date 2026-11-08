@@ -1535,6 +1535,51 @@ static const char *memwatchThermal(void) {
     }
     return "unknown";
 }
+// The JVM's pool of direct ByteBuffers, which live in malloc, so the memory trail can split them out of its malloc
+// figure. Through the public management API: java.nio.Bits holds the same count but is no contract. A global ref and
+// the getMemoryUsed method, or NULL with no exception left pending.
+static jobject memwatchDirectPool(JNIEnv *env, jmethodID *memoryUsed) {
+    jobject pool = NULL;
+    jclass factory = (*env)->FindClass(env, "java/lang/management/ManagementFactory");
+    jclass beanClass = factory ? (*env)->FindClass(env, "java/lang/management/BufferPoolMXBean") : NULL;
+    jclass listClass = beanClass ? (*env)->FindClass(env, "java/util/List") : NULL;
+    jmethodID beans = listClass ? (*env)->GetStaticMethodID(env, factory, "getPlatformMXBeans",
+                                                            "(Ljava/lang/Class;)Ljava/util/List;")
+                                : NULL;
+    jmethodID size = beans ? (*env)->GetMethodID(env, listClass, "size", "()I") : NULL;
+    jmethodID get = size ? (*env)->GetMethodID(env, listClass, "get", "(I)Ljava/lang/Object;") : NULL;
+    jmethodID name = get ? (*env)->GetMethodID(env, beanClass, "getName", "()Ljava/lang/String;") : NULL;
+    jmethodID used = name ? (*env)->GetMethodID(env, beanClass, "getMemoryUsed", "()J") : NULL;
+    jobject list = used ? (*env)->CallStaticObjectMethod(env, factory, beans, beanClass) : NULL;
+    jint n = list && !(*env)->ExceptionCheck(env) ? (*env)->CallIntMethod(env, list, size) : 0;
+    for (jint i = 0; i < n && !pool && !(*env)->ExceptionCheck(env); i++) {
+        jobject bean = (*env)->CallObjectMethod(env, list, get, i);
+        jstring s = bean && !(*env)->ExceptionCheck(env) ? (jstring)(*env)->CallObjectMethod(env, bean, name) : NULL;
+        const char *utf = s && !(*env)->ExceptionCheck(env) ? (*env)->GetStringUTFChars(env, s, NULL) : NULL;
+        if (utf && strcmp(utf, "direct") == 0)
+            pool = (*env)->NewGlobalRef(env, bean);
+        if (utf)
+            (*env)->ReleaseStringUTFChars(env, s, utf);
+        if (s)
+            (*env)->DeleteLocalRef(env, s);
+        if (bean)
+            (*env)->DeleteLocalRef(env, bean);
+    }
+    if ((*env)->ExceptionCheck(env))
+        (*env)->ExceptionClear(env);
+    if (list)
+        (*env)->DeleteLocalRef(env, list);
+    if (listClass)
+        (*env)->DeleteLocalRef(env, listClass);
+    if (beanClass)
+        (*env)->DeleteLocalRef(env, beanClass);
+    if (factory)
+        (*env)->DeleteLocalRef(env, factory);
+    if (pool)
+        *memoryUsed = used;
+    return pool;
+}
+
 static void *memWatchdog(void *printing) {
     pthread_setname_np("mem-watchdog");
     const uint64_t t0 = clock_gettime_nsec_np(CLOCK_MONOTONIC);
@@ -1542,6 +1587,9 @@ static void *memWatchdog(void *printing) {
     JNIEnv *env = NULL;
     jclass runtimeClass = NULL;
     jmethodID getRuntime = NULL, totalMemory = NULL, freeMemory = NULL;
+    jobject directPool = NULL;
+    jmethodID directUsed = NULL;
+    BOOL directLooked = NO;
     for (int i = 0;; i++) {
         @autoreleasepool {
             size_t avail = os_proc_available_memory();
@@ -1586,11 +1634,24 @@ static void *memWatchdog(void *printing) {
                 if ((*env)->ExceptionCheck(env))
                     (*env)->ExceptionClear(env);
             }
+            // Looked up once, after the heap first answers: by then the VM is far enough up to load the classes.
+            long directMB = -1;
+            if (heapCommittedMB >= 0 && !directLooked) {
+                directLooked = YES;
+                directPool = memwatchDirectPool(env, &directUsed);
+            }
+            if (directPool) {
+                jlong bytes = (*env)->CallLongMethod(env, directPool, directUsed);
+                if ((*env)->ExceptionCheck(env))
+                    (*env)->ExceptionClear(env);
+                else
+                    directMB = (long)(bytes >> 20);
+            }
             double t = (clock_gettime_nsec_np(CLOCK_MONOTONIC) - t0) / 1e9;
             if (printing)
                 fprintf(stderr, "[memwatch t=%4.1fs] avail=%.1fMB footprint=%.1fMB heapMB=%s thermal=%s\n", t,
                         avail / 1048576.0, fp / 1048576.0, heap, memwatchThermal());
-            RMMemoryTrailSample(heapUsedMB, heapCommittedMB);
+            RMMemoryTrailSample(heapUsedMB, heapCommittedMB, directMB);
         }
         const useconds_t printPause = i < 60 ? 500000 : 5000000;
         usleep(printing ? printPause : 60000000);
