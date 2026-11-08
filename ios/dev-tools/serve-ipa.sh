@@ -269,10 +269,23 @@ PY
 if [ "$SERVE" = 1 ]; then
   log "serve over Tailscale HTTPS"
   [ -f "$HTTPD_PID" ] && kill "$(cat "$HTTPD_PID")" 2>/dev/null || true
+  # The page is one port for the whole Mac, so a server another checkout (a worktree) left running keeps serving
+  # ITS build: the new server dies on the bind, and the phone installs the old IPA while this one looks published.
+  sleep 0.3
+  holder="$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
+  if [ -n "$holder" ]; then
+    die "port $PORT is still held by pid $holder: $(ps -o command= -p "$holder" | cut -c1-200)
+   The install page would serve that build, not $VERSTR. Stop it (kill $holder, or --stop from its checkout), then rerun."
+  fi
   # range/resume-capable static server (stdlib http.server ignores Range -> a flaky phone tunnel can't resume)
   nohup python3 "$HERE/serve-static.py" "$DIST" "$PORT" >"$WORK/httpd.log" 2>&1 &
   echo $! > "$HTTPD_PID"; disown 2>/dev/null || true
   sleep 1
+  # Up, and serving THIS build: an answer from the port alone could still be someone else's page.
+  served="$(curl -fsS --max-time 5 "http://127.0.0.1:$PORT/apps.json" 2>/dev/null \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["apps"][0]["version"])' 2>/dev/null || true)"
+  kill -0 "$(cat "$HTTPD_PID")" 2>/dev/null && [ "$served" = "$VERSTR" ] \
+    || die "the static server isn't serving $VERSTR (it answers '${served:-nothing}'); see $WORK/httpd.log"
   "$TS" serve --bg "$PORT" >/dev/null
 fi
 
