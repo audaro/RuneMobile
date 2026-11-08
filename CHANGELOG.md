@@ -14,6 +14,13 @@ as "What's new".
 
 ## [Unreleased]
 
+### Changed
+- **117 HD keeps the resolution you set when the phone gets hot.** It used to drop to 65% by itself and hold there
+  until the phone cooled, so a higher setting looked like it didn't save. Lowering it is now your choice: Game
+  settings > Lower resolution when hot. When the phone gets hot on 117 HD, a small notice offers to turn it on, at
+  most once each time you open the app, and has a Don't show again button. It waits until you're out of combat,
+  stays clear of the game's controls, and only its two buttons take a tap.
+
 ## [0.9.0] - 2026-11-07
 
 ### Added

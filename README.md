@@ -224,10 +224,11 @@ A few things this build does deliberately that you might otherwise mistake for b
   at a slow tick to save battery, and Android/Jagex may cut the connection;
   foregrounding triggers the automatic re-login above. (iOS keeps the session alive
   in the background.)
-- **A hot phone runs lighter.** Under sustained thermal pressure the 117HD renderer
-  temporarily lowers its internal resolution scale and restores it once the device
-  cools (both ports). On iPhone every renderer also lowers its frame rate as the phone
-  warms, and Low Power Mode holds it to 30 fps. This is intentional.
+- **A hot phone runs lighter.** On iPhone every renderer lowers its frame rate as the
+  phone warms, and Low Power Mode holds it to 30 fps. This is intentional. The 117HD
+  renderer can also lower its internal resolution while the phone is hot and put yours
+  back once it cools, but only with Game settings > Lower resolution when hot turned on
+  (both ports, off by default). On a hot phone with it off, a small notice offers it.
 - **The native HUD needs Resizable - Modern.** An account saved in Resizable - Classic
   or Fixed gets the game's own HUD instead, with a **Switch to Resizable - Modern**
   button at the top of the screen. One tap changes the game's own display setting,
