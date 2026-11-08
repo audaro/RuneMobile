@@ -4,9 +4,9 @@ import android.content.Context
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
-import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.compose.runtime.Composable
@@ -64,6 +64,7 @@ internal fun GsHeatSection() {
  */
 internal object HeatNotice {
     private const val ACCENT = 0xFFF29E1C.toInt()
+    private const val MUTED = 0x99FFFFFF.toInt()
 
     /**
      * Where the card goes: the lowest spot for a [w] x [h] box inside [area] that stays [gap] clear of every box in
@@ -114,113 +115,96 @@ internal object HeatNotice {
         return best
     }
 
-    /** The card. [compact] stacks the buttons under the text, for a narrow screen. */
+    /** The card. [compact] puts the buttons under the line, for a narrow screen. [takesTouch] is asked as a touch lands
+     *  on it: false lets the touch through to whatever is under the card instead. Kept discreet: one short line and
+     *  two text buttons on a see-through strip, no border, no filled button, so it reads as a passing hint over the
+     *  game rather than something that wants attention. */
     fun card(
         ctx: Context,
         compact: Boolean,
         onTurnOn: () -> Unit,
         onNeverAgain: () -> Unit,
+        takesTouch: () -> Boolean,
     ): View {
         val d = ctx.resources.displayMetrics.density
         val wrap = LinearLayout.LayoutParams.WRAP_CONTENT
         val buttons =
             LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
-                addView(button(ctx, "Don't show again", filled = false, onNeverAgain))
-                addView(
-                    button(ctx, "Turn on", filled = true, onTurnOn),
-                    LinearLayout.LayoutParams(wrap, wrap).apply { leftMargin = (8 * d).toInt() },
-                )
+                addView(button(ctx, "Don't show again", MUTED, bold = false, onNeverAgain))
+                addView(button(ctx, "Turn on", ACCENT, bold = true, onTurnOn))
             }
-        return LinearLayout(ctx).apply {
+        return object : LinearLayout(ctx) {
+            // A child that turns down the first touch of a gesture leaves the frame to offer it to the next view
+            // under the finger, so false here hands the whole gesture on.
+            override fun dispatchTouchEvent(ev: MotionEvent): Boolean =
+                if (ev.actionMasked == MotionEvent.ACTION_DOWN && !takesTouch()) false else super.dispatchTouchEvent(ev)
+        }.apply {
             orientation = if (compact) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
             if (!compact) gravity = Gravity.CENTER_VERTICAL
-            setPadding((12 * d).toInt(), (8 * d).toInt(), (10 * d).toInt(), (8 * d).toInt())
+            // The buttons' own height pads a single line; a line above them needs its own.
+            setPadding((10 * d).toInt(), if (compact) (7 * d).toInt() else 0, (2 * d).toInt(), 0)
             background =
                 GradientDrawable().apply {
-                    cornerRadius = 14 * d
-                    setColor(0xE0141414.toInt())
-                    setStroke((1 * d).toInt(), 0xB3F29E1C.toInt())
+                    cornerRadius = 10 * d
+                    setColor(0x8C000000.toInt())
                 }
             if (compact) {
                 // Both wrap. A MATCH_PARENT header in this WRAP_CONTENT column would be narrowed to the buttons' width
                 // after it was measured, keeping the height of its wider pass and cutting the text off.
-                addView(header(ctx, wide = false), LinearLayout.LayoutParams(wrap, wrap).apply { gravity = Gravity.START })
-                addView(
-                    buttons,
-                    LinearLayout.LayoutParams(wrap, wrap).apply {
-                        gravity = Gravity.END
-                        topMargin = (8 * d).toInt()
-                    },
-                )
+                addView(header(ctx), LinearLayout.LayoutParams(wrap, wrap).apply { gravity = Gravity.START })
+                addView(buttons, LinearLayout.LayoutParams(wrap, wrap).apply { gravity = Gravity.END })
             } else {
-                addView(header(ctx, wide = true), LinearLayout.LayoutParams(0, wrap, 1f))
-                addView(buttons, LinearLayout.LayoutParams(wrap, wrap).apply { leftMargin = (10 * d).toInt() })
+                addView(header(ctx), LinearLayout.LayoutParams(0, wrap, 1f))
+                addView(buttons, LinearLayout.LayoutParams(wrap, wrap).apply { leftMargin = (2 * d).toInt() })
             }
         }
     }
 
-    /** The thermometer, the title and the line under it. The text gives way to the buttons, never the other way. */
-    private fun header(
-        ctx: Context,
-        wide: Boolean,
-    ): View {
+    /** The thermometer and the line. The line gives way to the buttons, never the other way. */
+    private fun header(ctx: Context): View {
         val d = ctx.resources.displayMetrics.density
-        val texts =
-            LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(
-                    TextView(ctx).apply {
-                        text = "Your phone is getting hot"
-                        textSize = 14f
-                        setTypeface(typeface, Typeface.BOLD)
-                        setTextColor(0xFFFFFFFF.toInt())
-                    },
-                )
-                addView(
-                    TextView(ctx).apply {
-                        text = "Lowering 117 HD's resolution while it's hot helps it cool."
-                        textSize = 12f
-                        setTextColor(0xFFBFBFBF.toInt())
-                        if (wide) maxWidth = (240 * d).toInt() // two short lines beside the buttons
-                    },
-                )
-            }
         return LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(
                 TextView(ctx).apply {
                     text = "🌡" // thermometer
-                    textSize = 20f
-                    setPadding(0, 0, (10 * d).toInt(), 0)
+                    textSize = 13f
+                    setPadding(0, 0, (6 * d).toInt(), 0)
                 },
             )
-            addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(
+                TextView(ctx).apply {
+                    text = "Phone's hot. Lower 117 HD's resolution?"
+                    textSize = 12f
+                    setTextColor(0xD9FFFFFF.toInt())
+                },
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+            )
         }
     }
 
+    /** A text button, no fill: still a finger's height to tap, though the strip shows only its words. */
     private fun button(
         ctx: Context,
         label: String,
-        filled: Boolean,
+        color: Int,
+        bold: Boolean,
         onTap: () -> Unit,
     ) = Button(ctx).apply {
         val d = ctx.resources.displayMetrics.density
         text = label
-        textSize = 13f
+        textSize = 12f
         isAllCaps = false
+        if (bold) setTypeface(typeface, Typeface.BOLD)
         minWidth = 0
         minimumWidth = 0
         minHeight = 0
-        minimumHeight = (36 * d).toInt()
-        setPadding((12 * d).toInt(), (6 * d).toInt(), (12 * d).toInt(), (6 * d).toInt())
-        setTextColor(if (filled) 0xFF000000.toInt() else 0xFFFFFFFF.toInt())
-        background =
-            GradientDrawable().apply {
-                cornerRadius = 8 * d
-                setColor(if (filled) ACCENT else 0x1FFFFFFF)
-            }
+        minimumHeight = (32 * d).toInt()
+        setPadding((8 * d).toInt(), 0, (8 * d).toInt(), 0)
+        setTextColor(color)
+        background = null
         stateListAnimator = null
         setOnClickListener { onTap() }
     }

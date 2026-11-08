@@ -3357,7 +3357,8 @@ class MainActivity : AppCompatActivity() {
         val pick =
             listOf(false to areaW, true to areaW, true to narrow)
                 .mapNotNull { (compact, maxW) ->
-                    val card = HeatNotice.card(this, compact, ::onHeatNoticeTurnOn, ::onHeatNoticeNeverAgain)
+                    val card =
+                        HeatNotice.card(this, compact, ::onHeatNoticeTurnOn, ::onHeatNoticeNeverAgain, ::heatNoticeTakesTouch)
                     card.measure(
                         View.MeasureSpec.makeMeasureSpec(maxW, View.MeasureSpec.AT_MOST),
                         View.MeasureSpec.makeMeasureSpec(area[3] - area[1], View.MeasureSpec.AT_MOST),
@@ -3438,6 +3439,15 @@ class MainActivity : AppCompatActivity() {
     private fun disarm(v: View) {
         v.isClickable = false
         if (v is ViewGroup) for (i in 0 until v.childCount) disarm(v.getChildAt(i))
+    }
+
+    /** A touch landing on the notice. The checks in updateHeatNotice run a few times a second, so a control can come
+     *  up under it between two of them: then the touch goes to that instead, and the card goes once the touch has
+     *  been dispatched. */
+    private fun heatNoticeTakesTouch(): Boolean {
+        val inTheWay = heatNoticeRootSize != rootSize || heatNoticeCovers()
+        if (inTheWay) rootContainer?.post { hideHeatNotice("a control came up under it as it was touched") }
+        return !inTheWay
     }
 
     /** Has anything come up under the notice since it was placed: a panel opened, a dialogue, a button shown? */
