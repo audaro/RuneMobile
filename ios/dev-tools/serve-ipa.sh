@@ -126,8 +126,13 @@ case "$CONFIG" in Debug|Release) ;; *) die "CONFIG must be Debug or Release (got
 # Mac's screen with no output (2026-11-08: a 30-minute silent stall). Stop with the fix instead of changing a
 # setting that belongs to the whole account.
 if security list-keychains -d user | grep -qF "/build.keychain-db"; then
-  die "build.keychain-db is in the keychain search list, so codesign would wait on a password dialog. Put the
-   list back and rerun:  security list-keychains -d user -s \"\$HOME/Library/Keychains/login.keychain-db\""
+  KEEP=""
+  while IFS= read -r k; do
+    k="${k#"${k%%[![:space:]]*}"}"; k="${k#\"}"; k="${k%\"}"
+    case "$k" in */build.keychain-db) ;; ?*) KEEP="$KEEP $(printf '%q' "$k")" ;; esac
+  done < <(security list-keychains -d user)
+  die "build.keychain-db is in the keychain search list, so codesign would wait on a password dialog. Take it
+   out (the rest of the list stays) and rerun:  security list-keychains -d user -s${KEEP}"
 fi
 log "xcodebuild RuneMobile $VERSTR ($CONFIG, generic/iOS, signed)"
 xcodebuild -project "$APPDIR/RuneMobile.xcodeproj" -scheme RuneMobile -configuration "$CONFIG" \

@@ -321,7 +321,7 @@ static NSString *PoolsLine(Census *c) {
         pthread_t pt = (pthread_t)t->thread;
         BOOL alive = pt && pthread_threadid_np(pt, &tid) == 0; // a null thread would read as this one
         if (alive)
-            pthread_getname_np(pt, name, sizeof name);
+            alive = pthread_getname_np(pt, name, sizeof name) == 0; // it can exit between the two calls
         NSString *who = !alive              ? [NSString stringWithFormat:@"exited thread 0x%lx", (unsigned long)t->thread]
                         : pt == sMainThread ? @"main"
                         : name[0]           ? [NSString stringWithFormat:@"\"%s\"", name]
