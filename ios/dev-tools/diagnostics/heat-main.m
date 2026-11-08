@@ -773,8 +773,43 @@ static void checkPlayersMoves(void) {
     same(g.marker, 100, @"likewise, in the marker");
 }
 
+static void spotAt(CGRect area, CGSize size, NSArray<NSArray<NSNumber *> *> *rects, CGFloat x, CGFloat y,
+                   NSString *what) {
+    CGRect blockers[8];
+    NSUInteger n = 0;
+    for (NSArray<NSNumber *> *r in rects)
+        blockers[n++] = CGRectMake(r[0].doubleValue, r[1].doubleValue, r[2].doubleValue, r[3].doubleValue);
+    CGPoint o = CGPointMake(-1, -1);
+    BOOL ok = RMHeatNoticeSpot(area, size, blockers, n, 8, &o);
+    check(ok && o.x == x && o.y == y, [NSString stringWithFormat:@"%@ (got %@ %.0f,%.0f)", what, ok ? @"YES" : @"NO", o.x, o.y]);
+}
+
+static void checkNoticeSpot(void) {
+    CGRect area = CGRectMake(0, 0, 900, 400);
+    CGSize card = CGSizeMake(300, 100);
+    spotAt(area, card, @[], 300, 300, @"the notice: bottom centre on an empty screen");
+    spotAt(area, card, @[ @[ @0, @340, @200, @60 ], @[ @700, @200, @200, @200 ] ], 300, 300,
+           @"the notice: bottom centre between a key bar and an inventory");
+    spotAt(area, card, @[ @[ @0, @340, @380, @60 ], @[ @700, @200, @200, @200 ] ], 388, 300,
+           @"the notice: off centre, as near it as the gap allows");
+    spotAt(area, card, @[ @[ @0, @340, @420, @60 ], @[ @700, @200, @200, @200 ] ], 300, 232,
+           @"the notice: above the key bar when the gap beside it is too narrow");
+    spotAt(area, card, @[ @[ @400, @350, @100, @50 ] ], 92, 300,
+           @"the notice: beside a button in the middle of the bottom edge");
+    spotAt(area, card, @[ @[ @0, @330, @900, @70 ] ], 300, 222,
+           @"the notice: just above a full-width bar along the bottom");
+    spotAt(area, card, @[ @[ @0, @330, @900, @70 ], @[ @0, @250, @200, @50 ], @[ @700, @240, @200, @60 ] ], 300, 222,
+           @"the notice: above the bar, between what sits on it");
+    CGPoint o;
+    CGRect full[2] = {CGRectMake(0, 330, 900, 70), CGRectMake(0, 0, 900, 250)};
+    check(!RMHeatNoticeSpot(area, card, full, 2, 8, &o), @"the notice: no spot when nothing fits");
+    check(!RMHeatNoticeSpot(CGRectMake(0, 0, 250, 400), card, NULL, 0, 8, &o),
+          @"the notice: no spot on a screen narrower than it");
+}
+
 int main(void) {
     @autoreleasepool {
+        checkNoticeSpot();
         checkPolicy();
         checkLog();
         checkTiming();

@@ -83,6 +83,14 @@ typedef struct {
 /// CPU used by every thread in the app since launch.
 double RMAppCpuSeconds(void);
 
+/// Where the hot-phone notice goes: the lowest spot for a box of `size` inside `area` that stays `gap` clear of each of
+/// the `count` rects in `blockers`, and as near the middle across as the room there allows. It starts at the bottom of
+/// `area`; where something is in the way it moves up to just above it and looks again. Writes the box's top-left
+/// corner to `origin` and returns YES, or returns NO when nothing fits anywhere. Plain struct maths, so the heat
+/// check can run it without UIKit.
+BOOL RMHeatNoticeSpot(CGRect area, CGSize size, const CGRect *_Nullable blockers, NSUInteger count, CGFloat gap,
+                      CGPoint *origin);
+
 /// The session's readings, for the "Heat" section of Share logs: what the phone is doing now, and one line a minute.
 /// Written from the main thread, read from wherever the report is built. Foundation only, as above.
 @interface RMHeatLog : NSObject

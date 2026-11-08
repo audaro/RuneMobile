@@ -681,6 +681,7 @@ static NSString *RMPasteLine(NSString *s) {
 @property (nonatomic, assign) BOOL heatNoticeOffered;             // it has been up this launch
 @property (nonatomic, assign) CFTimeInterval heatNoticeCalmSince; // logged in and out of combat since, 0 = not now
 @property (nonatomic, assign) CFTimeInterval heatNoticeShownAt;
+@property (nonatomic, assign) CGSize heatNoticePlacedIn;  // the screen's size when it went up
 @property (nonatomic, assign) BOOL newInstallQueued;      // this launch has queued a new install's settings
 @property (nonatomic, assign) long long newInstallSaveId; // the save behind them, 0 until it's queued
 @property (nonatomic, strong) UIView *pluginPanel;
@@ -6007,7 +6008,9 @@ static int simHeatLowPower = -1;
 // Out of combat this long before the hot-phone notice may appear, and it goes by itself after kHeatNoticeSeconds.
 static const CFTimeInterval kHeatNoticeCalmSeconds = 10.0;
 static const CFTimeInterval kHeatNoticeSeconds = 20.0;
-static const CGFloat kHeatNoticeWideMin = 460; // narrower than this, the notice stacks its buttons under the text
+static const CGFloat kHeatNoticeMargin = 8;   // from the screen's safe edges, and from every control
+static const CGFloat kHeatNoticeFinger = 44;  // a control smaller than this takes a touch this big around it
+static const CGFloat kHeatNoticeNarrow = 280; // the narrow card, its text wrapped over its stacked buttons
 
 // The phone is hot enough that 117HD's resolution would come down, but the player hasn't allowed it. Offers the
 // switch once a launch, and never in a fight: it waits until the player has been logged in, out of combat and on the
@@ -6048,59 +6051,101 @@ static const CGFloat kHeatNoticeWideMin = 460; // narrower than this, the notice
             [RMGameSettings setHeatNoticeOff:YES];
             [ws hideHeatNotice:@"don't show again"];
         }];
+    // At the bottom of the screen, clear of every control: the game's HUD and every button of ours. The card is
+    // measured three ways: wide, with its buttons stacked, and stacked in a narrow column with the text wrapped. It
+    // takes whichever sits lowest, the wider on a tie. If nothing fits, there's no notice: it's never worth covering a
+    // control for.
+    NSArray<NSValue *> *blockers = [self heatNoticeBlockers];
+    CGRect area = CGRectInset(self.view.safeAreaLayoutGuide.layoutFrame, kHeatNoticeMargin, kHeatNoticeMargin);
     [self.screen addSubview:v];
-    // Over the world, never over the game's own HUD. On a wide screen with the chat in the top half (the landscape
-    // layout) it goes just under the chat, lined up with it, which keeps it off the orbs and the minimap on the right.
-    // A narrow screen (portrait) has no room beside them, so it stacks its buttons and goes centred under the lowest
-    // of the chat, minimap and orbs at the top. With none of them at the top it sits top centre, under the keyboard
-    // toggle, where the layout switch would; that's never up at the same time (heatNoticeCalm).
-    UILayoutGuide *g = self.view.safeAreaLayoutGuide;
-    [self.view layoutIfNeeded];
-    CGFloat midY = CGRectGetMidY(self.screen.bounds);
-    CGRect chat = [self heatNoticeHudRect:@"chat"];
-    BOOL chatUp = !CGRectIsEmpty(chat) && CGRectGetMidY(chat) < midY;
-    CGRect safe = g.layoutFrame;
-    CGFloat room = chatUp ? CGRectGetMaxX(safe) - 8 - CGRectGetMinX([self.screen convertRect:chat toView:self.view])
-                          : safe.size.width - 24;
-    v.compact = room < kHeatNoticeWideMin;
-    NSMutableArray<NSLayoutConstraint *> *place = [NSMutableArray arrayWithArray:@[
-        [v.widthAnchor constraintLessThanOrEqualToAnchor:g.widthAnchor
-                                                constant:-24],
-        [v.trailingAnchor constraintLessThanOrEqualToAnchor:g.trailingAnchor
-                                                   constant:-8],
-    ]];
-    if (chatUp && !v.compact) {
-        [place addObject:[v.topAnchor constraintEqualToAnchor:self.screen.topAnchor constant:CGRectGetMaxY(chat) + 6]];
-        [place addObject:[v.leadingAnchor constraintEqualToAnchor:self.screen.leadingAnchor constant:CGRectGetMinX(chat)]];
-    } else {
-        CGFloat below = 0;
-        for (NSString *key in @[ @"chat", @"minimap", @"orbs" ]) {
-            CGRect r = [self heatNoticeHudRect:key];
-            if (!CGRectIsEmpty(r) && CGRectGetMidY(r) < midY)
-                below = MAX(below, CGRectGetMaxY(r));
-        }
-        if (below > 0)
-            [place addObject:[v.topAnchor constraintEqualToAnchor:self.screen.topAnchor constant:below + 6]];
-        else
-            [place addObject:[v.topAnchor constraintEqualToAnchor:g.topAnchor constant:52]];
-        [place addObject:[v.centerXAnchor constraintEqualToAnchor:g.centerXAnchor]];
+    NSLayoutConstraint *x = [v.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:area.origin.x];
+    NSLayoutConstraint *y = [v.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:area.origin.y];
+    NSLayoutConstraint *cap = [v.widthAnchor constraintLessThanOrEqualToConstant:area.size.width];
+    [NSLayoutConstraint activateConstraints:@[ x, y, cap ]];
+    const BOOL compacts[3] = {NO, YES, YES};
+    const CGFloat caps[3] = {area.size.width, area.size.width, MIN(area.size.width, kHeatNoticeNarrow)};
+    CGPoint spots[3];
+    CGSize sizes[3];
+    int pick = -1;
+    for (int i = 0; i < 3; i++) {
+        v.compact = compacts[i];
+        cap.constant = caps[i];
+        [self.view layoutIfNeeded];
+        sizes[i] = v.bounds.size;
+        if ([self heatNoticeSpotFor:sizes[i] in:area blockers:blockers at:&spots[i]] &&
+            (pick < 0 || spots[i].y + sizes[i].height > spots[pick].y + sizes[pick].height + 1))
+            pick = i;
     }
-    [NSLayoutConstraint activateConstraints:place];
+    if (pick < 0) {
+        [v removeFromSuperview];
+        [self appendLine:@"[heat] hot-phone notice: no room clear of the controls, so none this launch"];
+        return;
+    }
+    v.compact = compacts[pick];
+    x.constant = spots[pick].x;
+    y.constant = spots[pick].y;
+    cap.active = NO;
+    [v.widthAnchor constraintEqualToConstant:sizes[pick].width].active = YES;
+    [self.view layoutIfNeeded];
     [v present];
     self.heatNotice = v;
     self.heatNoticeShownAt = CACurrentMediaTime();
-    [self appendLine:@"[heat] hot-phone notice shown: offers Lower resolution when hot"];
+    self.heatNoticePlacedIn = self.view.bounds.size;
+    [self appendLine:[NSString stringWithFormat:@"[heat] hot-phone notice shown at %@ (%@, clear of %lu controls): offers "
+                                                @"Lower resolution when hot",
+                                                NSStringFromCGRect(v.frame), @[ @"wide", @"compact", @"narrow" ][pick],
+                                                (unsigned long)blockers.count]];
 }
 
-// One of the game's HUD boxes on screen ("chat", "minimap", "orbs"), from the chrome snapshot, or CGRectZero when it
-// isn't showing.
-- (CGRect)heatNoticeHudRect:(NSString *)key {
+// Everything on screen the hot-phone notice mustn't cover, in self.view's points: the game's HUD from the chrome
+// snapshot (the chat, the minimap and orbs, the side panel and its tabs, the inventory), the dialogue box, and every
+// control of ours that shows. A small control counts as a fingertip around its middle, the area a touch for it lands in.
+- (NSArray<NSValue *> *)heatNoticeBlockers {
+    NSMutableArray<NSValue *> *out = [NSMutableArray array];
     NSString *snap = [JVMLauncher chromeSnapshot];
-    NSDictionary *d = snap.length ? parseBridgeJSON(snap, "ViewController.heatNoticeHudRect") : nil;
-    NSArray *b = [d isKindOfClass:[NSDictionary class]] ? d[key] : nil;
-    if (![b isKindOfClass:[NSArray class]] || b.count != 4)
-        return CGRectZero;
-    return [self viewRectForGameX:[b[0] intValue] y:[b[1] intValue] w:[b[2] intValue] h:[b[3] intValue]];
+    NSDictionary *d = snap.length ? parseBridgeJSON(snap, "ViewController.heatNoticeBlockers") : nil;
+    if ([d isKindOfClass:[NSDictionary class]]) {
+        NSMutableArray *boxes = [NSMutableArray array];
+        for (NSString *key in @[ @"chat", @"minimap", @"mapContainer", @"orbs", @"sideContainer", @"sidePanel", @"inv" ])
+            if (d[key])
+                [boxes addObject:d[key]];
+        if ([d[@"tabs"] isKindOfClass:[NSArray class]])
+            [boxes addObjectsFromArray:d[@"tabs"]];
+        for (NSArray *b in boxes) {
+            if (![b isKindOfClass:[NSArray class]] || b.count != 4 || [b[2] intValue] <= 0 || [b[3] intValue] <= 0)
+                continue;
+            CGRect r = [self viewRectForGameX:[b[0] intValue] y:[b[1] intValue] w:[b[2] intValue] h:[b[3] intValue]];
+            if (!CGRectIsEmpty(r))
+                [out addObject:[NSValue valueWithCGRect:[self.screen convertRect:r toView:self.view]]];
+        }
+    }
+    if (self.dialogueView && !self.dialogueView.hidden)
+        [out addObject:[NSValue valueWithCGRect:[self.dialogueView convertRect:self.dialogueView.bounds toView:self.view]]];
+    CGSize s = self.view.bounds.size;
+    [self eachTapTargetIn:self.view
+               screenArea:s.width * s.height
+                    found:^(CGRect f) {
+                        CGFloat dx = MAX(0, (kHeatNoticeFinger - f.size.width) / 2);
+                        CGFloat dy = MAX(0, (kHeatNoticeFinger - f.size.height) / 2);
+                        [out addObject:[NSValue valueWithCGRect:CGRectInset(f, -dx, -dy)]];
+                    }];
+    return out;
+}
+
+- (BOOL)heatNoticeSpotFor:(CGSize)size in:(CGRect)area blockers:(NSArray<NSValue *> *)blockers at:(CGPoint *)origin {
+    CGRect rects[blockers.count + 1];
+    for (NSUInteger i = 0; i < blockers.count; i++)
+        rects[i] = blockers[i].CGRectValue;
+    return RMHeatNoticeSpot(area, size, rects, blockers.count, kHeatNoticeMargin, origin);
+}
+
+// Has anything come up under the notice since it was placed: a panel opened, a dialogue, a button shown?
+- (BOOL)heatNoticeCovers {
+    CGRect mine = [self.heatNotice convertRect:self.heatNotice.bounds toView:self.view];
+    for (NSValue *b in [self heatNoticeBlockers])
+        if (CGRectIntersectsRect(mine, b.CGRectValue))
+            return YES;
+    return NO;
 }
 
 // While it's up, a few times a second: it goes the moment a fight starts or anything else takes the screen, once the
@@ -6114,6 +6159,10 @@ static const CGFloat kHeatNoticeWideMin = 460; // narrower than this, the notice
         [self hideHeatNotice:@"timed out"];
     else if (![self heatNoticeCalm])
         [self hideHeatNotice:@"a fight started or the screen changed"];
+    else if (!CGSizeEqualToSize(self.view.bounds.size, self.heatNoticePlacedIn))
+        [self hideHeatNotice:@"the screen turned or changed size"]; // its spot was for the old shape
+    else if ([self heatNoticeCovers])
+        [self hideHeatNotice:@"a control came up under it"];
 }
 
 - (void)hideHeatNotice:(NSString *)why {
@@ -7301,7 +7350,14 @@ static const CGFloat kHeatNoticeWideMin = 460; // narrower than this, the notice
     if (self.renderW <= 0 || W <= 0 || H <= 0)
         return;
     NSMutableData *rects = [NSMutableData data];
-    [self collectKeepOut:self.view into:rects scale:(CGFloat)self.renderW / W screenArea:W * H];
+    CGFloat k = (CGFloat)self.renderW / W;
+    [self eachTapTargetIn:self.view
+               screenArea:W * H
+                    found:^(CGRect f) {
+                        int r[4] = {(int)floor(f.origin.x * k), (int)floor(f.origin.y * k), (int)ceil(f.size.width * k),
+                                    (int)ceil(f.size.height * k)};
+                        [rects appendBytes:r length:sizeof(r)];
+                    }];
     if ([rects isEqualToData:self.sentKeepOut])
         return;
     self.sentKeepOut = rects;
@@ -7310,13 +7366,15 @@ static const CGFloat kHeatNoticeWideMin = 460; // narrower than this, the notice
     [self appendLine:[NSString stringWithFormat:@"[hud] overlay keep-out: %d control(s)", count / 4]];
 }
 
-// Walks `v`'s subviews for updateOverlayKeepOut. A control is taken whole. A view a quarter of the screen or bigger
+// Walks `v`'s subviews for every control a tap can reach, for updateOverlayKeepOut and the hot-phone notice, and hands
+// `found` each one's frame in self.view's points. A control is taken whole. A view a quarter of the screen or bigger
 // isn't a control: one with a solid background is a panel or a scrim, and nothing under it shows, so it is passed
-// over; a clear one (the plugin dock, the game view) is looked inside. The hold menu and the overlay editor are passed
-// over too: a box moving off either would chase it.
-- (void)collectKeepOut:(UIView *)v into:(NSMutableData *)rects scale:(CGFloat)k screenArea:(CGFloat)area {
+// over; a clear one (the plugin dock, the game view) is looked inside. The hold menu, the overlay editor and the
+// hot-phone notice are passed over too: a box moving off any of them would chase it.
+- (void)eachTapTargetIn:(UIView *)v screenArea:(CGFloat)area found:(void (^)(CGRect f))found {
     for (UIView *s in v.subviews) {
-        if (s.hidden || s.alpha < 0.01 || !s.userInteractionEnabled || s == self.menuContainer || s == self.overlayEdit)
+        if (s.hidden || s.alpha < 0.01 || !s.userInteractionEnabled || s == self.menuContainer || s == self.overlayEdit ||
+            s == self.heatNotice)
             continue;
         CGRect f = [s convertRect:s.bounds toView:self.view];
         BOOL big = f.size.width * f.size.height >= area / 4;
@@ -7324,16 +7382,13 @@ static const CGFloat kHeatNoticeWideMin = 460; // narrower than this, the notice
         for (UIGestureRecognizer *g in s.gestureRecognizers)
             tappable = tappable || g.enabled;
         if (!big && tappable) {
-            if (f.size.width >= 4 && f.size.height >= 4) {
-                int r[4] = {(int)floor(f.origin.x * k), (int)floor(f.origin.y * k), (int)ceil(f.size.width * k),
-                            (int)ceil(f.size.height * k)};
-                [rects appendBytes:r length:sizeof(r)];
-            }
+            if (f.size.width >= 4 && f.size.height >= 4)
+                found(f);
             continue;
         }
         if (big && s != self.screen && CGColorGetAlpha(s.backgroundColor.CGColor) > 0.5)
             continue;
-        [self collectKeepOut:s into:rects scale:k screenArea:area];
+        [self eachTapTargetIn:s screenArea:area found:found];
     }
 }
 

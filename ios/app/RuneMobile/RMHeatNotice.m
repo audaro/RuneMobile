@@ -117,6 +117,7 @@
     if (_dismissed)
         return;
     _dismissed = YES;
+    self.userInteractionEnabled = NO; // on its way out it takes no more taps: they go to whatever came up under it
     if (UIAccessibilityIsReduceMotionEnabled()) {
         [self removeFromSuperview];
         return;

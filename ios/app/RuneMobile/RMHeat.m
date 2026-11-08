@@ -199,6 +199,59 @@ static NSString *msText(double ms) {
     return ms >= 0 ? [NSString stringWithFormat:@"%.1f", ms] : @"-";
 }
 
+BOOL RMHeatNoticeSpot(CGRect area, CGSize size, const CGRect *blockers, NSUInteger count, CGFloat gap,
+                      CGPoint *origin) {
+    const CGFloat left = area.origin.x, right = area.origin.x + area.size.width;
+    const CGFloat mid = left + area.size.width / 2;
+    CGFloat starts[count + 1], ends[count + 1];
+    CGFloat bottom = area.origin.y + area.size.height;
+    while (bottom - size.height >= area.origin.y) {
+        const CGFloat top = bottom - size.height;
+        // What's in the way across this band, as x ranges sorted by where they start, and how far up the card has to
+        // go to clear the lowest of them.
+        NSUInteger n = 0;
+        CGFloat lift = -INFINITY;
+        for (NSUInteger i = 0; i < count; i++) {
+            const CGRect b = blockers[i];
+            if (b.origin.y - gap >= bottom || b.origin.y + b.size.height + gap <= top)
+                continue;
+            NSUInteger at = n++;
+            for (; at > 0 && starts[at - 1] > b.origin.x - gap; at--) {
+                starts[at] = starts[at - 1];
+                ends[at] = ends[at - 1];
+            }
+            starts[at] = b.origin.x - gap;
+            ends[at] = b.origin.x + b.size.width + gap;
+            lift = MAX(lift, b.origin.y - gap);
+        }
+        // The gaps between them that the card fits in, and the spot in one of those nearest the middle.
+        BOOL found = NO;
+        CGFloat bestX = 0, bestOff = INFINITY, from = left;
+        for (NSUInteger k = 0; k <= n; k++) {
+            const CGFloat to = k < n ? MIN(starts[k], right) : right;
+            if (to - from >= size.width) {
+                const CGFloat x = MIN(MAX(mid - size.width / 2, from), to - size.width);
+                const CGFloat off = fabs(x + size.width / 2 - mid);
+                if (off < bestOff) {
+                    bestOff = off;
+                    bestX = x;
+                    found = YES;
+                }
+            }
+            if (k < n)
+                from = MAX(from, ends[k]);
+        }
+        if (found) {
+            *origin = (CGPoint){bestX, top};
+            return YES;
+        }
+        if (n == 0)
+            return NO; // nothing in the way and still no room: the area is narrower than the card
+        bottom = lift;
+    }
+    return NO;
+}
+
 @implementation RMHeatLog {
     NSMutableArray<NSString *> *_lines;
     NSUInteger _dropped;
