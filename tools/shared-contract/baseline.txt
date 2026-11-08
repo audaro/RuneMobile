@@ -518,6 +518,7 @@ PAYLOAD MobileChromeBridge chat
 PAYLOAD MobileChromeBridge enabled
 PAYLOAD MobileChromeBridge fatalCode
 PAYLOAD MobileChromeBridge fatalError
+PAYLOAD MobileChromeBridge inCombat
 PAYLOAD MobileChromeBridge inv
 PAYLOAD MobileChromeBridge loggedIn
 PAYLOAD MobileChromeBridge loginScreen

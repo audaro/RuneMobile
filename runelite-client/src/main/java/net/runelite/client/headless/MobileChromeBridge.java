@@ -27,8 +27,12 @@ package net.runelite.client.headless;
 import java.awt.Rectangle;
 import java.util.Arrays;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.Actor;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
+import net.runelite.api.NPC;
+import net.runelite.api.Player;
+import net.runelite.api.WorldView;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarClientID;
 import net.runelite.api.gameval.VarbitID;
@@ -269,7 +273,8 @@ public final class MobileChromeBridge
 			.append(",\"rootKind\":\"").append(root.name()).append('"')
 			.append(",\"topLevelId\":").append(topLevel)
 			.append(",\"resized\":").append(resized)
-			.append(",\"activeTab\":").append(activeTab);
+			.append(",\"activeTab\":").append(activeTab)
+			.append(",\"inCombat\":").append(inCombat(c));
 
 		// World viewport rect.
 		final int[] vp = viewport(c);
@@ -648,5 +653,53 @@ public final class MobileChromeBridge
 	private static int b01(boolean v)
 	{
 		return v ? 1 : 0;
+	}
+
+	/**
+	 * Whether the player looks to be in a fight: their own health bar is up (they took a hit a moment ago), they're
+	 * facing a player or an NPC that can fight, or an NPC is attacking them. The shells hold back anything that would
+	 * appear over the game while this is true, such as the hot-phone notice, so a fault reads as yes. Client thread.
+	 */
+	static boolean inCombat(Client c)
+	{
+		try
+		{
+			final Player me = c.getLocalPlayer();
+			if (me == null)
+			{
+				return false;
+			}
+			if (me.getHealthScale() > 0)
+			{
+				return true;
+			}
+			final Actor target = me.getInteracting();
+			if (target instanceof Player)
+			{
+				return true;
+			}
+			if (target instanceof NPC && (target.getCombatLevel() > 0 || target.getHealthScale() > 0))
+			{
+				return true;
+			}
+			final WorldView wv = c.getTopLevelWorldView();
+			if (wv != null)
+			{
+				for (final NPC n : wv.npcs())
+				{
+					if (n != null && n.getInteracting() == me && n.getCombatLevel() > 0)
+					{
+						return true;
+					}
+				}
+			}
+		}
+		catch (RuntimeException e)
+		{
+			// Can't tell, so say yes: a wrong yes only holds the notice back, a wrong no could put it up mid-fight.
+			BridgeFaults.note("MobileChromeBridge.inCombat", e);
+			return true;
+		}
+		return false;
 	}
 }

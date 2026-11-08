@@ -13,7 +13,7 @@ how the bridge works, which thread each call runs on, and how to change it safel
 
 | Classes | Methods | JSON keys | System properties |
 |---:|---:|---:|---:|
-| 23 | 254 | 282 | 84 |
+| 23 | 254 | 283 | 84 |
 
 ## Classes
 
@@ -30,7 +30,7 @@ how the bridge works, which thread each call runs on, and how to change it safel
 - [`JavaBridge`](#javabridge): 55 methods, 14 properties
 - [`LootTrackerBridge`](#loottrackerbridge): 6 methods, 14 JSON keys
 - [`MenuPeekBridge`](#menupeekbridge): 5 methods, 23 JSON keys, 2 properties
-- [`MobileChromeBridge`](#mobilechromebridge): 5 methods, 22 JSON keys, 1 property
+- [`MobileChromeBridge`](#mobilechromebridge): 5 methods, 23 JSON keys, 1 property
 - [`MobileUiBridge`](#mobileuibridge): 65 methods, 15 JSON keys, 1 property
 - [`OverlayBridge`](#overlaybridge): 9 methods, 11 JSON keys
 - [`QuestHelperBridge`](#questhelperbridge): 8 methods, 10 JSON keys
@@ -471,7 +471,7 @@ W3 hybrid-chrome (Phase 6): the **read-only** geometry/state snapshot the native
 - `tick(Client c)` → `void`  
   Build the read-only chrome snapshot for this frame. Runs on the client thread (from `Hooks.draw`), where widget bounds and varcs are safe to read. Touches no widget.
 
-**JSON keys emitted:** `activeTab`, `chat`, `enabled`, `fatalCode`, `fatalError`, `inv`, `loggedIn`, `loginScreen`, `mapContainer`, `minimap`, `orbs`, `reconnecting`, `reorderPanes`, `resized`, `rootKind`, `scrollRects`, `sessionExpired`, `sideContainer`, `sidePanel`, `tabs`, `topLevelId`, `viewport`
+**JSON keys emitted:** `activeTab`, `chat`, `enabled`, `fatalCode`, `fatalError`, `inCombat`, `inv`, `loggedIn`, `loginScreen`, `mapContainer`, `minimap`, `orbs`, `reconnecting`, `reorderPanes`, `resized`, `rootKind`, `scrollRects`, `sessionExpired`, `sideContainer`, `sidePanel`, `tabs`, `topLevelId`, `viewport`
 
 **System properties read:** `runelite.mobilechrome`
 
