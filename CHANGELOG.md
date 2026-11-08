@@ -14,6 +14,8 @@ as "What's new".
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-07
+
 ### Added
 - **The game has sound.** Music, sound effects and area sounds now play on both apps, and so do plugins that bring
   their own sounds. They mix with anything else you're playing, and they stop when you leave the app and come back
@@ -21,8 +23,9 @@ as "What's new".
   On iPhone the game also plays with the Ring/Silent switch on silent, so use Game sound to quiet it.
 - **iPhone: the game eases off when the phone gets hot.** It lowers the frame rate as the phone warms up, on every
   renderer, and goes back up once it has cooled. Low Power Mode holds it to 30 fps.
-- **iPhone: Share logs shows heat, battery and frame timing readings,** a line a minute, to help with reports of a hot
-  phone.
+- **iPhone: Share logs shows heat, battery, frame timing and memory readings,** a line a minute, to help with reports
+  of a hot phone or of the app closing by itself. The memory readings survive the app being closed, so a report from
+  the next launch still has them.
 
 ### Changed
 - **iPhone: new installs start on GPU instead of 117 HD.** It runs much lighter on the phone, and 117 HD is still in
@@ -462,7 +465,9 @@ OAuth + RuneLite-account sync, native HUD/chat/tab-grid veneers, plugin panel.
 - Release signing: a dedicated key via `keystore.properties` when present, else
   the debug key (see `keystore.properties.example`).
 
-[Unreleased]: https://github.com/audaro/runemobile/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/audaro/runemobile/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/audaro/runemobile/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/audaro/runemobile/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/audaro/runemobile/compare/v0.6.0...v0.7.1
 [0.6.0]: https://github.com/audaro/runemobile/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/audaro/runemobile/compare/v0.4.0...v0.5.0

@@ -38,8 +38,14 @@ These are accepted, documented behaviors — list the ones true for the build be
   slow tick to save battery, and the connection may be cut; on return the automatic re-login runs, and the
   **first** resume-login can occasionally need one retry. iOS keeps the game running in the background
   (a silent audio session plus Picture-in-Picture) while you're logged in.
-- **Sustained heavy load lowers 117HD resolution.** Under thermal pressure the 117HD renderer steps
-  its scene-resolution scale down and restores it on cooldown (by design — keeps the frame rate up).
+- **A hot phone runs lighter.** Under thermal pressure the 117HD renderer steps its scene-resolution
+  scale down and restores it on cooldown, and on iOS every renderer also lowers its frame rate as the
+  phone warms and goes back up once it cools; Low Power Mode holds it to 30 fps (by design — keeps the
+  phone usable).
+- **iOS can close a long session for using too much memory.** Seen twice on an iPhone 16 Pro on the GPU
+  renderer, after about 50 minutes each time; the cause isn't known yet. Reopen the app and attach
+  StikDebug as usual. A Share logs report made after it happens includes the memory readings that will
+  help find it.
 - **JIT attach (iOS only).** iOS requires re-attaching the debugger (StikDebug) per launch to enable
   JIT; this is an OS constraint, not a bug.
 - **The CPU renderer slows as the phone heats up.** It draws the whole game in software, so its frame

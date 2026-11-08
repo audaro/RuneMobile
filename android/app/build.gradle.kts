@@ -50,7 +50,7 @@ android {
         // versionCode). Scheme: major*10000 + minor*100 + patch (room for 99 minors/patches). Record every bump
         // in the root CHANGELOG.md.
         val verMajor = 0
-        val verMinor = 8
+        val verMinor = 9
         val verPatch = 0
         val semverCode = verMajor * 10000 + verMinor * 100 + verPatch
         // CI rolling builds (tools/ci/) pass -PversionCodeOverride=<monotonic> and -PversionNameSuffix=<-master.N+sha>
