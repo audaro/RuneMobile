@@ -162,6 +162,7 @@ fun GameSettingsScreen(onBack: () -> Unit) {
             GsScreenSection()
             GsTouchSection()
             GsGameSection()
+            GsHeatSection()
             GsAudioSection()
             GsLoginSection()
             GsHapticsSection()

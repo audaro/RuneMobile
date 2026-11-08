@@ -9,6 +9,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -32,6 +33,7 @@ import android.view.ScaleGestureDetector
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.inputmethod.BaseInputConnection
@@ -256,6 +258,16 @@ class MainActivity : AppCompatActivity() {
     // pref is off, so a non-dev build/session pays nothing (no views, no timer). rootContainer is the frame the
     // chip/panel attach to; the ticker samples fps (native present-count delta), heap (bridge), and thermal ~1 Hz.
     private var rootContainer: FrameLayout? = null
+
+    // The hot-phone notice (updateHeatNotice): offers Lower resolution when hot, at most once a launch, between fights.
+    private var heatNotice: View? = null // null unless it's up
+    private var heatNoticeOffered = false // it has been up this launch
+    private var heatNoticeCalmSinceMs = 0L // logged in and out of combat since, 0 = not now
+    private var heatNoticeShownMs = 0L
+    private var heatNoticeNextPollMs = 0L
+    private var heatNoticePinned = false // DEBUG: up until a button or the broadcast takes it down, for a capture
+    private var launcherSheet: View? = null // the plugin launcher, which the notice must never sit over
+    private var heatPrefsListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
 
     // FOLD-2: the frame holding the SurfaceView and every view that maps canvas px through its size; see fitGameStage.
     private var gameStage: FrameLayout? = null
@@ -570,6 +582,9 @@ class MainActivity : AppCompatActivity() {
         // The layout-switch pill waits this far into a run of unsupported-layout frames before it shows, so a
         // varbit that syncs late after login, or a one-frame blip, never flashes it over a Modern account.
         private const val LAYOUT_SWITCH_SETTLE_MS = 3_000L
+        private const val HEAT_NOTICE_POLL_MS = 250L
+        private const val HEAT_NOTICE_CALM_MS = 10_000L // out of combat this long before the hot-phone notice may show
+        private const val HEAT_NOTICE_SHOW_MS = 20_000L // then it goes by itself
 
         // How long the server gets to apply a layout switch before the pill gives up and says how to do it by hand.
         private const val LAYOUT_SWITCH_TIMEOUT_MS = 15_000L
@@ -806,15 +821,32 @@ class MainActivity : AppCompatActivity() {
             )
             // PERF-MEMORY-THERMAL-01: force a thermal status for verification (real thermal pressure is hard to induce
             // on demand). `--ei level N` injects status 0..6 (NONE..SHUTDOWN); level<0 or omitted follows the sensor.
+            // `--ei lower 0|1` sets Game settings > Lower resolution when hot, and `--es notice show|hide` puts the
+            // hot-phone notice up or takes it down whatever the heat (it counts as this launch's notice); `pin` puts it
+            // up to stay, even logged out, for a capture. Either one alone leaves the status as it is.
             thermalTestReceiver =
                 object : BroadcastReceiver() {
                     override fun onReceive(
                         ctx: Context?,
                         intent: Intent?,
                     ) {
-                        val level = intent?.getIntExtra("level", -1) ?: -1
-                        Log.i(TAG, "SET_THERMAL_STATUS level=$level")
-                        thermalGovernor?.forceStatus(level)
+                        val i = intent ?: return
+                        if (i.hasExtra("lower")) {
+                            val on = i.getIntExtra("lower", 0) != 0
+                            Log.i(TAG, "SET_THERMAL_STATUS lower when hot=$on")
+                            HeatSettings.setLowerResolution(this@MainActivity, on)
+                        }
+                        val notice = i.getStringExtra("notice")
+                        heatNoticePinned = notice == "pin"
+                        when (notice) {
+                            "show", "pin" -> if (heatNotice == null) showHeatNotice()
+                            "hide" -> hideHeatNotice("debug broadcast")
+                        }
+                        if (i.hasExtra("level") || !(i.hasExtra("lower") || i.hasExtra("notice"))) {
+                            val level = i.getIntExtra("level", -1)
+                            Log.i(TAG, "SET_THERMAL_STATUS level=$level")
+                            thermalGovernor?.forceStatus(level)
+                        }
                     }
                 }
             ContextCompat.registerReceiver(
@@ -1055,6 +1087,7 @@ class MainActivity : AppCompatActivity() {
                 visibility = View.GONE
                 elevation = 200f
             }
+        launcherSheet = pluginPanel
         // Compact, low-profile dev affordances (single-glyph): kill the Material 88dp min width + slim padding so
         // the three sit in a small bottom-left cluster instead of three chunky buttons across the HUD.
         val devD = resources.displayMetrics.density
@@ -1905,7 +1938,16 @@ class MainActivity : AppCompatActivity() {
                     getSystemService(POWER_SERVICE) as PowerManager,
                     is117hd = rlhdMode,
                     markerFile = File(filesDir, "thermal-throttle.marker"),
+                    lowerResolution = { HeatSettings.lowerResolution(app) },
                 ).also { it.start() }
+            // The switch can change in Game settings or from the notice, and no thermal status change may follow to
+            // apply it. SharedPreferences holds its listeners weakly, so this one is kept in a field.
+            val listener =
+                SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                    if (key == HeatSettings.KEY_LOWER_RESOLUTION) thermalGovernor?.refresh()
+                }
+            prefs(app).registerOnSharedPreferenceChangeListener(listener)
+            heatPrefsListener = listener
         }
         // AP-2a: start draining the notification/link queues. Safe before the VM is up — the externs return ""
         // until the MobileUiBridge facade publishes, then start yielding real items.
@@ -3236,6 +3278,124 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    /** The frame's work over the game after the chrome: the overlay keep-out, the world map and the hot-phone notice. */
+    private fun updateOverlays() {
+        applyOverlayAvoid()
+        updateWorldMap()
+        updateHeatNotice()
+    }
+
+    /**
+     * The hot-phone notice, a few times a second from the frame loop. On 117 HD, a phone hot enough that its
+     * resolution would come down, with the player not having allowed that, gets the offer once a launch. It waits for a
+     * calm moment: logged in, out of combat for [HEAT_NOTICE_CALM_MS] and nothing else over the game. While it's up it
+     * goes the moment a fight starts, once the switch is on (from Game settings too), and after [HEAT_NOTICE_SHOW_MS].
+     */
+    private fun updateHeatNotice() {
+        val now = SystemClock.uptimeMillis()
+        if (now < heatNoticeNextPollMs) return
+        heatNoticeNextPollMs = now + HEAT_NOTICE_POLL_MS
+        if (heatNotice != null) {
+            when {
+                heatNoticePinned -> Unit
+                HeatSettings.lowerResolution(this) -> hideHeatNotice("turned on in Game settings")
+                now - heatNoticeShownMs >= HEAT_NOTICE_SHOW_MS -> hideHeatNotice("timed out")
+                !heatNoticeCalm() -> hideHeatNotice("a fight started or the screen changed")
+            }
+        } else if (heatNoticeWanted() && heatNoticeCalm()) {
+            if (heatNoticeCalmSinceMs == 0L) heatNoticeCalmSinceMs = now
+            if (now - heatNoticeCalmSinceMs >= HEAT_NOTICE_CALM_MS) showHeatNotice()
+        } else {
+            heatNoticeCalmSinceMs = 0L
+        }
+    }
+
+    /** Hot enough for a lower resolution, with the player not having allowed one, and not offered yet this launch. */
+    private fun heatNoticeWanted(): Boolean =
+        !heatNoticeOffered &&
+            thermalGovernor?.hot == true &&
+            !HeatSettings.lowerResolution(this) &&
+            !HeatSettings.noticeOff(this)
+
+    /** Logged in, not fighting, and nothing else over the game. False when the game can't say. */
+    private fun heatNoticeCalm(): Boolean {
+        val covered =
+            mapOpen ||
+                menuActive ||
+                launcherSheet?.visibility == View.VISIBLE ||
+                (::layoutSwitchButton.isInitialized && layoutSwitchButton.visibility == View.VISIBLE)
+        val o = if (covered) null else runCatching { JSONObject(JvmLauncher.chromeSnapshotPub()) }.getOrNull()
+        return o != null && o.optBoolean("loggedIn") && !o.optBoolean("inCombat")
+    }
+
+    private fun showHeatNotice() {
+        val root = rootContainer ?: return
+        heatNoticeOffered = true
+        val snap = runCatching { JSONObject(JvmLauncher.chromeSnapshotPub()) }.getOrNull()
+        val at =
+            HeatNotice.place(root.width, root.height, safeInsetsLTR(), resources.displayMetrics.density) { key ->
+                snap?.let { hudBoxInRoot(it, key) }
+            }
+        val card =
+            HeatNotice.card(
+                this,
+                at.compact,
+                onTurnOn = {
+                    HeatSettings.setLowerResolution(this, true)
+                    hideHeatNotice("turned on")
+                    Toast.makeText(this, "Lower resolution when hot is on", Toast.LENGTH_SHORT).show()
+                },
+                onNeverAgain = {
+                    HeatSettings.setNoticeOff(this, true)
+                    hideHeatNotice("don't show again")
+                },
+            )
+        // Under the launcher and the cards above the game, over the game and its chrome.
+        val index = if (::layoutSwitchButton.isInitialized) root.indexOfChild(layoutSwitchButton) + 1 else 0
+        root.addView(card, if (index > 0) index else -1, at.params)
+        card.alpha = 0f
+        card
+            .animate()
+            .alpha(1f)
+            .setDuration(250)
+            .start()
+        heatNotice = card
+        heatNoticeShownMs = SystemClock.uptimeMillis()
+        Log.i(TAG, "heat: hot-phone notice shown (compact=${at.compact}), offers Lower resolution when hot")
+    }
+
+    /** A HUD box from the chrome snapshot in the root frame's px, [left, top, right, bottom], or null if it isn't up. */
+    private fun hudBoxInRoot(
+        snap: JSONObject,
+        key: String,
+    ): IntArray? {
+        val a = snap.optJSONArray(key)?.takeIf { it.length() >= 4 && it.optInt(2) > 0 && it.optInt(3) > 0 }
+        val stage = gameStage
+        val fw = JvmLauncher.frameWidth()
+        val fh = JvmLauncher.frameHeight()
+        if (a == null || stage == null || fw <= 0) return null
+        val sx = surfaceView.width.toFloat() / fw
+        val sy = surfaceView.height.toFloat() / fh.coerceAtLeast(1)
+        return intArrayOf(
+            stage.left + (a.optInt(0) * sx).toInt(),
+            stage.top + (a.optInt(1) * sy).toInt(),
+            stage.left + ((a.optInt(0) + a.optInt(2)) * sx).toInt(),
+            stage.top + ((a.optInt(1) + a.optInt(3)) * sy).toInt(),
+        )
+    }
+
+    private fun hideHeatNotice(why: String) {
+        val v = heatNotice ?: return
+        heatNotice = null
+        v
+            .animate()
+            .alpha(0f)
+            .setDuration(250)
+            .withEndAction { (v.parent as? ViewGroup)?.removeView(v) }
+            .start()
+        Log.i(TAG, "heat: hot-phone notice gone: $why")
+    }
+
     /** Show, label or hide the one-tap layout-switch pill for this frame. [unsupported] is a logged-in frame in a
      *  layout the native HUD can't drive. */
     private fun updateLayoutSwitch(
@@ -3524,8 +3684,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     updateChrome()
                     updateKeepAwake()
-                    applyOverlayAvoid()
-                    updateWorldMap()
+                    updateOverlays()
                     Choreographer.getInstance().postFrameCallback(this)
                 }
             }
@@ -5431,6 +5590,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
+        hideHeatNotice("the app went to the background")
         // A8: the app is backgrounded (and may be killed) — persist any pending plugin-config writes now so a
         // toggle/setting isn't lost. Off the UI thread (it dispatches to the client thread); fire-and-forget.
         if (booted.get()) {
@@ -5478,6 +5638,8 @@ class MainActivity : AppCompatActivity() {
         thermalTestReceiver = null
         shareLogsTestReceiver?.let { runCatching { unregisterReceiver(it) } }
         shareLogsTestReceiver = null
+        heatPrefsListener?.let { prefs(applicationContext).unregisterOnSharedPreferenceChangeListener(it) }
+        heatPrefsListener = null
         thermalGovernor?.stop()
         thermalGovernor = null // PERF-MEMORY-THERMAL-01: unregister + restore the baseline scale
         armHopScrimHook = null // ENH-B06: drop the static hook so a dead activity can't be re-armed

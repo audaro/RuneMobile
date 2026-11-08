@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Drives the DEBUG app's ThermalGovernor on an emulator with forced thermal statuses, and reads the saved profile
-# and the marker file after each step: cooling down, a player moving the setting mid-throttle, a kill mid-throttle, a
-# kill right after a player's move, and a swipe-away. Each has to end with the player's value on disk before the marker
-# goes. Expect ANDROID_HEAT_GREEN.
+# and the marker file after each step. First a hot phone with Game settings > Lower resolution when hot off, as it is
+# out of the box, which has to leave the resolution alone. Then, with it on: cooling down, a player moving the setting
+# mid-throttle, a kill mid-throttle, a kill right after a player's move, and a swipe-away. Each has to end with the
+# player's value on disk before the marker goes. The switch goes back off at the end. Expect ANDROID_HEAT_GREEN.
 #   android/dev-tools/diagnostics/heat-check.sh [-s <serial>]
 # Emulator only: it boots 117HD with the rlhd.mode marker, force-stops the app and rewrites the saved scale. Install the
 # debug APK first. About three minutes.
@@ -30,6 +31,10 @@ marker() {
 
 status() {
 	"${ADB[@]}" shell am broadcast -a "$PKG.SET_THERMAL_STATUS" --ei level "$1" >/dev/null
+}
+
+lower_when_hot() { # 0|1
+	"${ADB[@]}" shell am broadcast -a "$PKG.SET_THERMAL_STATUS" --ei lower "$1" >/dev/null
 }
 
 set_scale() {
@@ -109,6 +114,7 @@ if [[ "$("${ADB[@]}" shell getprop ro.kernel.qemu | tr -d '\r')" != 1 ]]; then
 	exit 1
 fi
 cleanup() {
+	lower_when_hot 0 || true
 	"${ADB[@]}" shell rm -f "$FILES/rlhd.mode" || true
 }
 trap cleanup EXIT
@@ -122,9 +128,26 @@ wait_log 'state=LOGIN_SCREEN' 180 || {
 	echo "ANDROID_HEAT_RED the app never reached the login screen"
 	exit 1
 }
+lower_when_hot 0
 set_scale "$PLAYER"
 save_until "$PLAYER"
 echo "  saved scale $(saved_scale), marker [$(marker)]"
+
+echo "hot, with Lower resolution when hot off:"
+"${ADB[@]}" logcat -c
+status 3
+sleep 10
+if "${ADB[@]}" logcat -d | grep -q 'thermal status=[0-9] -> sceneResolutionScale'; then fail "it moved the resolution anyway"; fi
+save_until "$PLAYER"
+[[ -z "$(marker)" ]] || fail "a marker with nothing throttled: $(marker)"
+echo "  saved scale $(saved_scale), marker [$(marker)]"
+echo "  then turned on while hot:"
+"${ADB[@]}" logcat -c
+lower_when_hot 1
+wait_log 'thermal status=3 -> sceneResolutionScale .*->50 ' 30 || fail "turning it on didn't throttle"
+status 0
+wait_log 'sceneResolutionScale 50->'"$PLAYER"' ' 30 || fail "cooling down didn't put $PLAYER back"
+save_until "$PLAYER"
 
 echo "cooling down, with the throttle saved:"
 throttle_and_save

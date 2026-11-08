@@ -25,11 +25,17 @@ import java.io.File
  * is up, and config writes wait on the client thread. So while it has more to do, a pass is run again every RETRY_MS.
  * While throttled, a marker file records the TRUE baseline, so a kill mid-throttle can't make the lowered value the
  * player's: the keeper's doc has how that holds up.
+ *
+ * The resolution comes down only while [lowerResolution] says the player has allowed it (Game settings > Lower
+ * resolution when hot, off by default). Otherwise the keeper is told the phone is cool, so all it does is put back
+ * anything an earlier throttle took, and [hot] lets the activity offer the switch instead. Call [refresh] when the
+ * setting changes, since no thermal status change may come to apply it.
  */
 class ThermalGovernor(
     private val pm: PowerManager,
     private val is117hd: Boolean,
     private val markerFile: File,
+    private val lowerResolution: () -> Boolean,
 ) {
     private val store =
         object : ThermalScaleStore {
@@ -64,11 +70,11 @@ class ThermalGovernor(
 
     @RequiresApi(Build.VERSION_CODES.Q)
     private fun registerQ() {
-        val l = PowerManager.OnThermalStatusChangedListener { status -> onStatus(status) }
+        val l = PowerManager.OnThermalStatusChangedListener { status -> refresh(status) }
         pm.addThermalStatusListener(l)
         listener = l
         Log.i(TAG, "thermal governor armed (117HD); current status=${pm.currentThermalStatus}")
-        onStatus(pm.currentThermalStatus) // apply the starting status immediately
+        refresh(pm.currentThermalStatus) // apply the starting status immediately
     }
 
     fun stop() {
@@ -83,27 +89,34 @@ class ThermalGovernor(
         pass()
     }
 
-    /** DEBUG: force a thermal status for verification (SET_THERMAL_STATUS broadcast). Pass -1 to follow the sensor. */
-    fun forceStatus(status: Int) {
-        forcedStatus = status
-        onStatus(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) pm.currentThermalStatus else 0)
-    }
+    /** True while the phone is hot enough for a lower resolution, whether or not the player allows one. */
+    val hot: Boolean
+        get() = is117hd && !stopped && status >= HOT_STATUS
 
-    private fun onStatus(rawStatus: Int) {
+    /** Run a step on a new sensor reading, or with the last one to apply a change to [lowerResolution] now. */
+    fun refresh(rawStatus: Int = sensorStatus) {
         if (!is117hd) return
         sensorStatus = rawStatus
         pass()
     }
 
+    /** DEBUG: force a thermal status for verification (SET_THERMAL_STATUS broadcast). Pass -1 to follow the sensor. */
+    fun forceStatus(status: Int) {
+        forcedStatus = status
+        refresh(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) pm.currentThermalStatus else 0)
+    }
+
+    private val status: Int
+        get() =
+            when {
+                stopped -> 0
+                forcedStatus >= 0 -> forcedStatus
+                else -> sensorStatus
+            }
+
     private fun pass() {
         JvmLauncher.onBridge {
-            val status =
-                when {
-                    stopped -> 0
-                    forcedStatus >= 0 -> forcedStatus
-                    else -> sensorStatus
-                }
-            val moreToDo = keeper.step(status)
+            val moreToDo = keeper.step(if (lowerResolution()) status else 0)
             retries.removeCallbacksAndMessages(null)
             if (moreToDo) retries.postDelayed(::pass, RETRY_MS)
         }
@@ -146,5 +159,6 @@ class ThermalGovernor(
         private const val TAG = "MainActivity"
         private const val RETRY_MS = 2_000L
         private const val ACK_OK = "{\"ok\":true"
+        private const val HOT_STATUS = 2 // PowerManager.THERMAL_STATUS_MODERATE, where ThermalScaleKeeper starts at 65%
     }
 }
