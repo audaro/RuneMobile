@@ -127,6 +127,11 @@ BUILD_KC="$HOME/Library/Keychains/build.keychain-db"
 KC_PW="${CI_CONFIG_DIR:-$HOME/.runemobile-ci}/keychain.pw"
 if [ -f "$BUILD_KC" ] && [ -f "$KC_PW" ]; then
   security unlock-keychain -p "$(cat "$KC_PW")" "$BUILD_KC" || die "could not unlock $BUILD_KC with $KC_PW"
+  # codesign only looks in the search list. Put the build keychain first if it is missing, keeping the others.
+  if ! security list-keychains -d user | grep -qF "$BUILD_KC"; then
+    KCS=(); while IFS= read -r k; do k="${k#"${k%%[![:space:]]*}"}"; KCS+=("${k//\"/}"); done < <(security list-keychains -d user)
+    security list-keychains -d user -s "$BUILD_KC" "${KCS[@]}" || die "could not add $BUILD_KC to the keychain search list"
+  fi
 elif [ -f "$BUILD_KC" ]; then
   printf '\033[1;33m!! no %s: if %s is locked, codesign waits for its password\n   in a dialog on the Mac screen and the build goes quiet\033[0m\n' "$KC_PW" "$BUILD_KC" >&2
 fi
