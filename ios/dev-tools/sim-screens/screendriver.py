@@ -18,9 +18,10 @@ sys.path.insert(0, str(REPO / "tools/mcp"))
 import harness_server as hs  # noqa: E402  (simulator, capture and diff helpers)
 
 # Logged out on the CPU renderer with the game picture covered, so a screen looks the same from run to run whatever
-# the game behind it is doing.
-LAUNCH_ARGS = ["-rendererPref", "cpu", "-RMAutoPlay", "YES", "-RMSkipLogin", "YES", "-RMBlankGame", "YES",
-               "-RMScreenDriver", "YES"]
+# the game behind it is doing. Landscape is pinned too: a simulator left in portrait mode (Game settings > Screen)
+# draws portrait inside the landscape window, and every shot comes out sideways.
+LAUNCH_ARGS = ["-rendererPref", "cpu", "-screen.portrait", "NO", "-screen.auto", "NO", "-RMAutoPlay", "YES",
+               "-RMSkipLogin", "YES", "-RMBlankGame", "YES", "-RMScreenDriver", "YES"]
 # After the login screen first shows, the plugin rail and the account rows are still filling in.
 BOOT_SETTLE = 3.0
 SCREEN_TIMEOUT = 30
@@ -81,8 +82,8 @@ class Driver:
             raise DriverError(f"the app didn't reach the login screen: {details.get('reason')}")
         time.sleep(BOOT_SETTLE)
         # simctl captures in the device's portrait frame and sim_capture turns it by the window rotation
-        # Simulator.app records per device. The app is landscape-only, so a window still in portrait gives
-        # sideways shots.
+        # Simulator.app records per device. LAUNCH_ARGS keep the app in landscape, so a window still in portrait
+        # gives sideways shots.
         try:
             probe, _info = hs.sim_capture(self.udid, mask_island=False)
         except RuntimeError as e:
