@@ -15,7 +15,9 @@
 //   threads every thread in the process
 // All in MB. What fp holds beyond gfx, media, malloc and the committed heap is mostly Metaspace, the code cache and
 // thread stacks. Under each line, "zones" gives MB/blocks for each malloc zone of a megabyte or more, and a Debug build
-// adds a walk of the live blocks: "sizes" by block size every minute, "objc" the classes holding most every fifth.
+// adds a walk of the live blocks: "sizes" by block size, "pools" autorelease pool pages by
+// owning thread and "strings" Swift string objects with their commonest texts every minute, "objc" the classes holding
+// most every fifth.
 #import <Foundation/Foundation.h>
 
 // Starts this session's trail. Call once, on the thread that will call RMMemoryTrailSample.

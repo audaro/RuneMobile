@@ -9,6 +9,7 @@
 #if DEBUG
 #import <dlfcn.h>
 #import <objc/runtime.h>
+#import <pthread.h>
 #endif
 
 static const uint64_t kIntervalSec = 60;
@@ -117,16 +118,50 @@ static NSString *ZonesLine(void) {
 //   sizes   MB/blocks by block size, every minute
 //   objc    the classes holding the most bytes, every fifth minute, matched by the class pointer at the start of a
 //           block. Not exact: a raw buffer that happens to start with a class's address counts as that class.
+//   pools   autorelease pool pages by the thread that owns them, every minute. A page holds about 500 autoreleased
+//           objects, so a thread that autoreleases and never pops a pool grows a chain of them.
+//   strings Swift's string objects, every minute: how many, and the commonest texts among a sample of them.
 static const vm_size_t kBucketTop[] = {256, 1024, 4096, 16384, 65536, 262144, 1048576, (vm_size_t)-1};
 static const char *const kBucketName[] = {"<=256", "<=1K", "<=4K", "<=16K", "<=64K", "<=256K", "<=1M", ">1M"};
 enum { kBuckets = sizeof kBucketTop / sizeof kBucketTop[0],
-       kTopClasses = 10 };
+       kTopClasses = 10,
+       kPoolThreads = 32,
+       kTopPools = 4,
+       kStringSamples = 256,
+       kStringSampleBytes = 40,
+       kTopStrings = 6 };
 static const uint64_t kClassEveryMin = 5;
+
+// objc4's AutoreleasePoolPage starts with magic_t (0xA1A1A1A1 then "AUTORELEASE!"), then next, thread, parent,
+// child, depth. Pages are PAGE_MIN_SIZE (4 KB on arm64) unless the runtime protects them, which uses 16 KB.
+static const uint32_t kPoolMagic = 0xA1A1A1A1;
+static const size_t kPoolThreadOffset = 24, kPoolDepthOffset = 48;
+// Swift's __StringStorage on 64-bit: isa, refcount, capacity and flags, then count and flags (the count is the low
+// 48 bits), then the UTF-8 text.
+static const size_t kStringCountOffset = 24, kStringTextOffset = 32;
+
+typedef struct {
+    uintptr_t thread;
+    uint64_t pages;
+    uint32_t depth;
+} PoolThread;
+
+typedef struct {
+    uint64_t length;
+    char text[kStringSampleBytes];
+} StringSample;
 
 typedef struct {
     uint64_t bytes[kBuckets];
     uint64_t blocks[kBuckets];
     BOOL classes;
+    PoolThread pools[kPoolThreads];
+    unsigned poolThreads;
+    uint64_t poolPages, poolPagesUnplaced;
+    uintptr_t stringClass;
+    uint64_t strings, stringBytes, stringEvery;
+    StringSample samples[kStringSamples];
+    unsigned sampled;
 } Census;
 
 // Every class the runtime knows, in an open-addressed table at most half full; a block's counts go to its class's slot.
@@ -177,6 +212,17 @@ static NSString *IndexClasses(void) {
         sClassSlots[j] = cls;
     }
     free(list);
+    return [NSString stringWithFormat:@"indexed %u classes in %llu ms", n,
+                                      (clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - t0) / NSEC_PER_MSEC];
+}
+
+// Once, before the first walk: anything that may allocate has to happen outside the zone locks.
+static uintptr_t sStringClass;
+static void PrepareWalks(void) {
+    static BOOL done;
+    if (done)
+        return;
+    done = YES;
     // The runtime exports the mask that strips a non-pointer isa down to its class; the fallbacks are objc4's.
     const uintptr_t *mask = dlsym(RTLD_DEFAULT, "objc_debug_isa_class_mask");
 #if TARGET_OS_SIMULATOR
@@ -184,8 +230,39 @@ static NSString *IndexClasses(void) {
 #else
     sIsaMask = mask ? *mask : 0x0000000ffffffff8ull;
 #endif
-    return [NSString stringWithFormat:@"indexed %u classes in %llu ms", n,
-                                      (clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - t0) / NSEC_PER_MSEC];
+    Class s = objc_lookUpClass("_TtCs15__StringStorage") ?: objc_lookUpClass("Swift.__StringStorage");
+    sStringClass = (uintptr_t)(__bridge void *)s;
+}
+
+static inline void CountPoolPage(Census *c, const uint8_t *page) {
+    uintptr_t thread = *(const uintptr_t *)(page + kPoolThreadOffset);
+    uint32_t depth = *(const uint32_t *)(page + kPoolDepthOffset);
+    c->poolPages++;
+    for (unsigned k = 0; k < c->poolThreads; k++) {
+        if (c->pools[k].thread == thread) {
+            c->pools[k].pages++;
+            c->pools[k].depth = MAX(c->pools[k].depth, depth);
+            return;
+        }
+    }
+    if (c->poolThreads == kPoolThreads) {
+        c->poolPagesUnplaced++;
+        return;
+    }
+    c->pools[c->poolThreads++] = (PoolThread){thread, 1, depth};
+}
+
+static inline void CountString(Census *c, const uint8_t *object, vm_size_t size) {
+    c->strings++;
+    c->stringBytes += size;
+    if (c->sampled == kStringSamples || c->strings % c->stringEvery != 0)
+        return;
+    uint64_t length = *(const uint64_t *)(object + kStringCountOffset) & 0x0000ffffffffffffull;
+    if (length >= size - kStringTextOffset)
+        return; // not laid out the way this build expects; leave it out rather than read past the block
+    StringSample *s = &c->samples[c->sampled++];
+    s->length = length;
+    memcpy(s->text, object + kStringTextOffset, MIN(length, (uint64_t)kStringSampleBytes));
 }
 
 static void CountRanges(task_t task, void *context, unsigned type, vm_range_t *ranges, unsigned count) {
@@ -199,15 +276,105 @@ static void CountRanges(task_t task, void *context, unsigned type, vm_range_t *r
             b++;
         c->bytes[b] += size;
         c->blocks[b]++;
-        if (c->classes && size >= sizeof(uintptr_t)) {
-            uintptr_t cls = *(const uintptr_t *)ranges[i].address & sIsaMask;
-            long slot = cls ? SlotOf(cls) : -1;
+        if (size < sizeof(uintptr_t))
+            continue;
+        const uint8_t *p = (const uint8_t *)ranges[i].address;
+        uintptr_t cls = *(const uintptr_t *)p & sIsaMask;
+        if (size >= 4096 && size <= 16384 && *(const uint32_t *)p == kPoolMagic && !memcmp(p + 4, "AUTORELEASE!", 12))
+            CountPoolPage(c, p);
+        else if (cls && cls == c->stringClass && size > kStringTextOffset)
+            CountString(c, p, size);
+        if (c->classes && cls) {
+            long slot = SlotOf(cls);
             if (slot >= 0) {
                 sClassBytes[slot] += size;
                 sClassBlocks[slot]++;
             }
         }
     }
+}
+
+// Image constructors run on the main thread, before main().
+static pthread_t sMainThread;
+__attribute__((constructor)) static void NoteMainThread(void) {
+    sMainThread = pthread_self();
+}
+
+// "Java: Client (4120p, depth 4119)": the owning thread's name, read only if the thread still exists.
+static NSString *PoolsLine(Census *c) {
+    if (!c->poolThreads)
+        return @"   pools none found";
+    NSMutableArray<NSString *> *owners = [NSMutableArray array];
+    BOOL picked[kPoolThreads] = {NO};
+    for (unsigned k = 0; k < kTopPools; k++) {
+        int best = -1;
+        for (unsigned i = 0; i < c->poolThreads; i++)
+            if (!picked[i] && (best < 0 || c->pools[i].pages > c->pools[best].pages))
+                best = (int)i;
+        if (best < 0)
+            break;
+        picked[best] = YES;
+        PoolThread *t = &c->pools[best];
+        // pthread_getname_np and pthread_threadid_np check the thread list first and fail on a thread that is gone.
+        char name[64] = "";
+        uint64_t tid = 0;
+        pthread_t pt = (pthread_t)t->thread;
+        BOOL alive = pt && pthread_threadid_np(pt, &tid) == 0; // a null thread would read as this one
+        if (alive)
+            pthread_getname_np(pt, name, sizeof name);
+        NSString *who = !alive              ? [NSString stringWithFormat:@"exited thread 0x%lx", (unsigned long)t->thread]
+                        : pt == sMainThread ? @"main"
+                        : name[0]           ? [NSString stringWithFormat:@"\"%s\"", name]
+                                            : [NSString stringWithFormat:@"unnamed tid %llu", tid];
+        [owners addObject:[NSString stringWithFormat:@"%@ %llup depth %u", who, t->pages, t->depth]];
+    }
+    NSMutableString *line = [NSMutableString
+        stringWithFormat:@"   pools %llu pages: %@", c->poolPages, [owners componentsJoinedByString:@", "]];
+    if (c->poolPagesUnplaced)
+        [line appendFormat:@" (+%llu pages on other threads)", c->poolPagesUnplaced];
+    return line;
+}
+
+static int CompareSamples(const void *a, const void *b) {
+    const StringSample *x = a, *y = b;
+    if (x->length != y->length)
+        return x->length < y->length ? -1 : 1;
+    return memcmp(x->text, y->text, MIN(x->length, (uint64_t)kStringSampleBytes));
+}
+
+// "strings 5766k 271 MB: "some text" x40, ...": the texts are cut at 40 bytes, with anything unprintable as '.'.
+static NSString *StringsLine(Census *c) {
+    if (!c->stringClass)
+        return @"   strings (no Swift string class in this process)";
+    NSMutableString *line = [NSMutableString
+        stringWithFormat:@"   strings %@ %.1f MB, %u sampled:", Blocks(c->strings), c->stringBytes / 1048576.0, c->sampled];
+    qsort(c->samples, c->sampled, sizeof c->samples[0], CompareSamples);
+    unsigned runStart[kStringSamples], runLength[kStringSamples], runs = 0;
+    for (unsigned i = 0; i < c->sampled; i++) {
+        if (i == 0 || CompareSamples(&c->samples[i - 1], &c->samples[i]) != 0) {
+            runStart[runs] = i;
+            runLength[runs++] = 0;
+        }
+        runLength[runs - 1]++;
+    }
+    for (unsigned k = 0; k < kTopStrings && runs; k++) {
+        unsigned best = 0;
+        for (unsigned r = 1; r < runs; r++)
+            if (runLength[r] > runLength[best])
+                best = r;
+        if (!runLength[best])
+            break;
+        StringSample *s = &c->samples[runStart[best]];
+        char text[kStringSampleBytes + 1];
+        unsigned n = (unsigned)MIN(s->length, (uint64_t)kStringSampleBytes);
+        for (unsigned i = 0; i < n; i++)
+            text[i] = (s->text[i] >= 0x20 && s->text[i] < 0x7f && s->text[i] != '"') ? s->text[i] : '.';
+        text[n] = 0;
+        [line appendFormat:@" \"%s\"%s (%llu) x%u", text, s->length > kStringSampleBytes ? "..." : "", s->length,
+                           runLength[best]];
+        runLength[best] = 0;
+    }
+    return line;
 }
 
 static BOOL IsMallocsOwnZone(const char *name) {
@@ -222,7 +389,13 @@ static NSArray<NSString *> *CensusLines(uint64_t minute) {
     // From the third minute, once boot is over, then every fifth. Two samples can round to the same minute, so this
     // counts from the last census rather than matching minute numbers.
     static uint64_t classesDue = 3;
-    Census c = {{0}, {0}, NO};
+    // Spread the string sample over the whole walk: one in every (last walk's count / samples).
+    static uint64_t lastStrings;
+    Census c;
+    memset(&c, 0, sizeof c);
+    PrepareWalks();
+    c.stringClass = sStringClass;
+    c.stringEvery = MAX(1, lastStrings / kStringSamples);
     if (minute >= classesDue) {
         classesDue = minute + kClassEveryMin;
         if (!sClassSlots && !indexNote)
@@ -262,7 +435,8 @@ static NSArray<NSString *> *CensusLines(uint64_t minute) {
         [sizes appendFormat:@" %s %.1f/%@", kBucketName[b], c.bytes[b] / 1048576.0, Blocks(c.blocks[b])];
     [sizes appendFormat:@" (walked %u zones in %llu ms, longest lock %llu ms)", walk, took / NSEC_PER_MSEC,
                         worst / NSEC_PER_MSEC];
-    NSMutableArray<NSString *> *lines = [NSMutableArray arrayWithObject:sizes];
+    lastStrings = c.strings;
+    NSMutableArray<NSString *> *lines = [NSMutableArray arrayWithObjects:sizes, PoolsLine(&c), StringsLine(&c), nil];
     if (c.classes) {
         NSMutableString *objc = [NSMutableString stringWithString:@"   objc"];
         size_t picked[kTopClasses];
