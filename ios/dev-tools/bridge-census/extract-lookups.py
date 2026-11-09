@@ -204,7 +204,9 @@ def extract(path):
         raise ExtractError(f"{Path(path).name}:{line_of(src, pos)}: the {what} '{arg}' is neither a literal nor a parameter")
 
     calls = "FindClass|NewGlobalRef|" + "|".join(LOOKUP_FNS)
-    pattern = r"(?:(\w+)\s*=\s*(?:\(\s*jclass\s*\)\s*)?)?\(\*\w+\)->(" + calls + r")\s*\("
+    # "cls = (*env)->FindClass(...)", optionally behind a cast or a one-word guard: "cls = prev ? (*env)->..."
+    pattern = (r"(?:(\w+)\s*=\s*(?:\w+\s*\?\s*)?(?:\(\s*jclass\s*\)\s*)?)?\(\*\w+\)->(" + calls
+               + r")\s*\(")
     for fn in fns:
         start, end, fname = fn[:3]
         classes = {}  # class variable -> FindClass argument text, in source order
