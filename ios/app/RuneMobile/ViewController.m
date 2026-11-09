@@ -646,8 +646,9 @@ static NSString *RMPasteLine(NSString *s) {
 // FATAL-1: a native card for engine-fatal stops (the snapshot's "fatalError"/"fatalCode", noted from
 // RSAppletStub.onError via the bridge). Desktop RuneLite shows a Swing FatalErrorDialog these headless
 // boots can't render — without this, every weekly OSRS update ends in a silent black screen (stale client
-// rev -> error_game_js5connect). Terminal state: the card stays up (the applet is dead, nothing recovers);
-// the single button quits the app so the user can relaunch (and, for js5connect, install the rebuilt app).
+// rev -> error_game_js5connect_outofdate). Terminal state: the card stays up (the applet is dead, nothing
+// recovers); the single button quits the app so the user can relaunch (and, for outofdate, install the rebuilt
+// app).
 @property (nonatomic, strong) UIView *fatalErrorScrim;
 @property (nonatomic, strong) UILabel *fatalErrorTitle;
 @property (nonatomic, strong) UILabel *fatalErrorBody;
@@ -5813,15 +5814,29 @@ static const CFTimeInterval kKeepAwakeGrace = 10.0;
     ]];
 }
 
-// FATAL-1: per-code copy. js5connect after the weekly OSRS update = stale client rev — the honest headline
-// case (the fix is a rebuilt app, or you're offline); js5io = blocked/flaky connection; crash = engine died.
+// FATAL-1: per-code copy. The engine's js5 tokens are distinct: js5connect_outofdate = the server refused this
+// client's revision (a weekly game update; only a rebuilt app fixes it); js5connect = four failed connection
+// attempts with no answer (servers down for maintenance, offline, or a blocked network; a rebuild does nothing);
+// js5connect_full = the server said it was full or busy; js5io = the stream broke; crash = engine died.
 + (NSArray<NSString *> *)fatalCopyForCode:(NSString *)code {
+    if ([code isEqualToString:@"error_game_js5connect_outofdate"]) {
+        return @[
+            @"Old School RuneScape has updated",
+            @"The game moved to a new version that this build of the app can't join yet. Install the newest "
+            @"build of the app, then reopen it."
+        ];
+    }
     if ([code isEqualToString:@"error_game_js5connect"]) {
         return @[
             @"Can't reach the game servers",
-            @"Old School RuneScape may have just updated — after a weekly game update this app needs a "
-            @"rebuilt release before it can connect. Install the newest build of the app, or if you're "
-            @"offline, check your connection and reopen the app."
+            @"The game servers aren't answering. They may be down for maintenance or a game update, or your "
+            @"network may be blocking them. Wait a few minutes, check your connection, then reopen the app."
+        ];
+    }
+    if ([code isEqualToString:@"error_game_js5connect_full"]) {
+        return @[
+            @"The game servers are busy",
+            @"The game servers are full or busy right now. Wait a few minutes, then reopen the app."
         ];
     }
     if ([code isEqualToString:@"error_game_js5io"]) {

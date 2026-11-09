@@ -12,10 +12,10 @@ import android.view.View
  * FATAL-1: a full-screen, INTERACTIVE card for engine-fatal stops (the chrome snapshot's
  * "fatalError"/"fatalCode", noted from RSAppletStub.onError via MobileChromeBridge). Desktop RuneLite routes
  * these to a Swing FatalErrorDialog the headless boot can't render — without this card, every weekly OSRS
- * update ends in a silent black screen (stale client rev -> error_game_js5connect). This is a TERMINAL
- * state: the applet is dead and nothing recovers, so the card latches on and its "Restart app" button
- * relaunches the process (the same clean-boot mechanism as the renderer restarts; for a stale-rev js5connect
- * the copy tells the user a rebuilt app is needed). "Share logs" beside it opens [Diagnostics], since the card
+ * update ends in a silent black screen (stale client rev -> error_game_js5connect_outofdate). This is a
+ * TERMINAL state: the applet is dead and nothing recovers, so the card latches on and its "Restart app"
+ * button relaunches the process (the same clean-boot mechanism as the renderer restarts; for outofdate the
+ * copy tells the user a rebuilt app is needed, for a plain js5connect that the servers aren't answering). "Share logs" beside it opens [Diagnostics], since the card
  * covers the plugin panel's About screen. Consumes touches while visible, like [SessionExpiredOverlayView].
  */
 class FatalErrorOverlayView(
@@ -110,18 +110,37 @@ class FatalErrorOverlayView(
 
     val isActive: Boolean get() = active
 
-    // Per-code copy. js5connect after the weekly OSRS update = stale client rev — the honest headline case
-    // (the fix is a rebuilt app, or you're offline); js5io = blocked/flaky connection; crash = engine died.
+    // Per-code copy. The engine's js5 tokens are distinct: js5connect_outofdate = the server refused this
+    // client's revision (a weekly game update; only a rebuilt app fixes it); js5connect = four failed
+    // connection attempts with no answer (servers down for maintenance, offline, or a blocked network; a
+    // rebuild does nothing); js5connect_full = the server said it was full or busy; js5io = the stream broke;
+    // crash = engine died.
     private fun copyFor(code: String): Pair<String, List<String>> =
         when (code) {
+            "error_game_js5connect_outofdate" -> {
+                "Old School RuneScape has updated" to
+                    listOf(
+                        "The game moved to a new version that this",
+                        "build of the app can't join yet. Install the",
+                        "newest build of the app, then restart it.",
+                    )
+            }
+
             "error_game_js5connect" -> {
                 "Can't reach the game servers" to
                     listOf(
-                        "Old School RuneScape may have just updated —",
-                        "after a weekly game update this app needs a",
-                        "rebuilt release before it can connect.",
-                        "Install the newest build of the app, or if",
-                        "you're offline, check your connection.",
+                        "The game servers aren't answering. They may",
+                        "be down for maintenance or a game update, or",
+                        "your network may be blocking them. Wait a few",
+                        "minutes, check your connection, then restart.",
+                    )
+            }
+
+            "error_game_js5connect_full" -> {
+                "The game servers are busy" to
+                    listOf(
+                        "The game servers are full or busy right now.",
+                        "Wait a few minutes, then restart the app.",
                     )
             }
 
