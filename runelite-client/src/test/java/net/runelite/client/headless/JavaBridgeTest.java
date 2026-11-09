@@ -232,6 +232,33 @@ public class JavaBridgeTest
 		assertEquals("nothing scrollable + on-screen -> empty snapshot", 0, JavaBridge.getScrollableRects().length);
 	}
 
+	@Test
+	public void engineScrollableAtAnswersFromTheSnapshot() throws Exception
+	{
+		// The iOS pan-begin gate runs on the native UI thread, where the gamepack throws from Widget.isHidden, so
+		// it must answer from the client thread's snapshot alone: a widget that throws proves it reads nothing live.
+		final Widget child = scrollWidget(new Rectangle(10, 20, 100, 200), 200, 400);
+		final Widget root = plainWidget(new Rectangle(0, 0, 300, 300));
+		when(root.getDynamicChildren()).thenReturn(new Widget[]{child});
+		final Client c = mock(Client.class);
+		when(c.getWidgetRoots()).thenReturn(new Widget[]{root});
+		invokeSnapshot(c);
+		when(child.isHidden()).thenThrow(new IllegalStateException("must be called on client thread"));
+		when(root.isHidden()).thenThrow(new IllegalStateException("must be called on client thread"));
+
+		assertTrue("inside the scroll layer", JavaBridge.isEngineScrollableAt(15, 25));
+		assertTrue("its last row and column", JavaBridge.isEngineScrollableAt(109, 219));
+		assertFalse("left of it", JavaBridge.isEngineScrollableAt(9, 25));
+		assertFalse("one past its right edge", JavaBridge.isEngineScrollableAt(110, 25));
+		assertFalse("one past its bottom edge", JavaBridge.isEngineScrollableAt(15, 220));
+
+		final Widget bare = plainWidget(new Rectangle(0, 0, 300, 300));
+		final Client none = mock(Client.class);
+		when(none.getWidgetRoots()).thenReturn(new Widget[]{bare});
+		invokeSnapshot(none);
+		assertFalse("nothing scrollable open -> a camera drag", JavaBridge.isEngineScrollableAt(15, 25));
+	}
+
 	private static void invokeSnapshot(Client c) throws Exception
 	{
 		final Method m = JavaBridge.class.getDeclaredMethod("collectScrollableRects", Client.class);

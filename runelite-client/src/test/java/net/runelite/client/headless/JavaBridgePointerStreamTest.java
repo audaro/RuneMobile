@@ -179,6 +179,70 @@ public class JavaBridgePointerStreamTest
 		assertEquals("and the release with it", TAP_X, cap.first(MouseEvent.MOUSE_RELEASED).getX());
 	}
 
+	/**
+	 * The gamepack keeps only a wheel event's rotation and scrolls whatever is under its own recorded mouse, so a
+	 * wheel at a point the pointer is not on must move it there first. Before that, a swipe in a skill guide
+	 * scrolled the skills tab that was tapped to open it.
+	 */
+	@Test
+	public void aWheelAwayFromThePointerMovesItThereFirst() throws Exception
+	{
+		JavaBridge.onMove(TAP_X, TAP_Y);
+		pump();
+		cap.clear();
+
+		JavaBridge.onWheel(TAP_X - 120, TAP_Y + 60, 1);
+		pump();
+
+		final List<MouseEvent> seen = cap.all();
+		assertEquals("one move, then the wheel: " + ids(seen), 2, seen.size());
+		assertEquals(MouseEvent.MOUSE_MOVED, seen.get(0).getID());
+		assertEquals("the move goes to the wheel's point", TAP_X - 120, seen.get(0).getX());
+		assertEquals(TAP_Y + 60, seen.get(0).getY());
+		assertEquals(MouseEvent.MOUSE_WHEEL, seen.get(1).getID());
+	}
+
+	/** Notches of one swipe at a pointer already there post no moves, so a scroll stream doesn't double its events. */
+	@Test
+	public void aWheelAtThePointerPostsNoMove() throws Exception
+	{
+		JavaBridge.onMove(TAP_X, TAP_Y);
+		pump();
+		cap.clear();
+
+		JavaBridge.onWheel(TAP_X, TAP_Y, 1);
+		JavaBridge.onWheel(TAP_X, TAP_Y, 1);
+		pump();
+
+		assertEquals("no move: " + ids(cap.all()), 0, cap.count(MouseEvent.MOUSE_MOVED));
+		assertEquals(2, cap.count(MouseEvent.MOUSE_WHEEL));
+	}
+
+	/** A parked pointer comes back through the enter, which the gamepack handles as a move: no second move. */
+	@Test
+	public void aWheelAfterAParkEntersAtItsPoint() throws Exception
+	{
+		JavaBridge.onMove(TAP_X, TAP_Y);
+		pump();
+		JavaBridge.parkPointer();
+		pump();
+		cap.clear();
+
+		JavaBridge.onWheel(TAP_X - 120, TAP_Y + 60, -1);
+		pump();
+
+		assertEquals("no extra move: " + ids(cap.all()), 0, cap.count(MouseEvent.MOUSE_MOVED));
+		final MouseEvent enter = cap.first(MouseEvent.MOUSE_ENTERED);
+		assertEquals("the enter is at the wheel's point", TAP_X - 120, enter.getX());
+		assertEquals(TAP_Y + 60, enter.getY());
+		assertEquals(1, cap.count(MouseEvent.MOUSE_WHEEL));
+	}
+
+	private static List<Integer> ids(List<MouseEvent> events)
+	{
+		return events.stream().map(MouseEvent::getID).collect(Collectors.toList());
+	}
+
 	// ---- harness ---------------------------------------------------------------------------------------
 
 	private void settleUntilArmed() throws Exception

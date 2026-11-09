@@ -26,6 +26,10 @@ as "What's new".
   what filled it.
 
 ### Fixed
+- **iOS: dragging a finger scrolls the bank, skill guides and other lists.** A drag inside a window that scrolls (the
+  bank, a skill guide, the emotes or quest list, settings, the collection log) turned the camera instead, so only
+  the scroll bar's arrows moved it. A drag that starts over the game world still turns the camera. Android already
+  scrolled.
 - **"How many would you like to make?" boxes can be tapped after a message box.** Once a message like "Your
   inventory is too full" had shown, the next make box (chiselling amethyst, fletching, cooking) ignored taps, and
   so did the chat from then on; only the number keys worked. The app kept treating the closed

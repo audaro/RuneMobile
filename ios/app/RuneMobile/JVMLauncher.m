@@ -2352,6 +2352,9 @@ static void RMEnsureResizableDisplayMode(NSString *rlHome, JVMLogSink log) {
                                               // (chat lines / orb values / minimap positions for the veneers)
         @"-Drunelite.hudveneer=true",         // W3 Feature-A A3: arm the HudVeneerBridge (engine-HUD
                                               // suppression; native sets which elements to hide, e.g. chat)
+        // The scrollable areas of open windows, read on the game thread, so a drag that starts on one scrolls it
+        // (isEngineScrollableAt).
+        @"-Drunelite.bridge.scrollrects=true",
         // "Renderers as plugins": drop safe-mode in EVERY mode (incl. plain CPU) so the GPU + 117HD plugins load
         // + show in the panel (GpuPlugin is loadInSafeMode=false). DeviceHeadlessBoot reads this. The plugin HUB
         // works with safe-mode off; the one hazard — the PUBLIC hub 117HD whose jar has no facade (it collides

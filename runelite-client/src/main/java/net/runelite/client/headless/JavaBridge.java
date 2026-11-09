@@ -1197,7 +1197,7 @@ public final class JavaBridge
 		snapshotTextInputOpen(c);  // publish INPUT_TYPE for isTextInputOpen() to read off the client thread
 		snapshotInventoryBounds(c); // DRAG-1: publish the inventory item-grid bounds for the native item-drag branch
 		snapshotReorderPaneBounds(c); // DRAG-1b: publish Prayer/Spellbook/Bank pane bounds for native reorder-drag routing
-		snapshotScrollableRects(c); // DRAG-2: scrollable-widget rects for Android's drag-to-scroll routing (Android-armed, 100 ms)
+		snapshotScrollableRects(c); // DRAG-2: scrollable-widget rects for both shells' drag-to-scroll routing (100 ms)
 		// Deterministic early registration (boolean-gated, retries until the injector is live): the
 		// BeforeMenuRender suppression below must be in place before the FIRST menu ever opens, not
 		// lazily on the first tap.
@@ -2220,6 +2220,13 @@ public final class JavaBridge
 	 * {@code Hooks.mouseWheelMoved} routes through {@code mouseManager} exactly like a {@link MouseEvent}.
 	 * Pinch-zoom maps to this: negative {@code rotation} = wheel up = zoom in. {@code (x,y)} is the pinch
 	 * centroid so the gamepack zooms about it.
+	 *
+	 * <p>The pointer is moved to {@code (x,y)} first when it is somewhere else. The gamepack's wheel listener
+	 * keeps only the rotation and never reads the event's point: the interface it scrolls, or the zoom, is
+	 * picked at its own recorded mouse position. A pointer parked by {@link #parkPointer} gets there through
+	 * the {@code MOUSE_ENTERED} {@link #primeFocus} posts (the gamepack's enter handler is its move handler),
+	 * but one still present after a tap stays where that tap was. Without the move, a swipe over a skill
+	 * guide scrolled the skills tab tapped to open it.
 	 */
 	public static void onWheel(int shownX, int shownY, int rotation)
 	{
@@ -2233,8 +2240,13 @@ public final class JavaBridge
 		}
 		final EventQueue q = Toolkit.getDefaultToolkit().getSystemEventQueue();
 		final long t = System.currentTimeMillis();
+		final boolean present = entered;
 		primeFocus(q, canvas, t, x, y);
-		postPointer(q, new MouseWheelEvent(canvas, MouseEvent.MOUSE_WHEEL, t + 1, 0, x, y, 0, false,
+		if (present && (lastPointerX != x || lastPointerY != y))
+		{
+			postPointer(q, new MouseEvent(canvas, MouseEvent.MOUSE_MOVED, t + 1, 0, x, y, 0, false));
+		}
+		postPointer(q, new MouseWheelEvent(canvas, MouseEvent.MOUSE_WHEEL, t + 2, 0, x, y, 0, false,
 			MouseWheelEvent.WHEEL_UNIT_SCROLL, Math.abs(rotation), rotation));
 	}
 
@@ -2751,14 +2763,12 @@ public final class JavaBridge
 		return reorderPaneBounds;
 	}
 
-	// DRAG-2: bounds of ALL visible, overflowing scroll-layer widgets, snapshotted on the client thread each
-	// frame so Android can hit-test a one-finger drag's START point lock-free (via the getSnapshot payload's
-	// scrollRects) and route it as an interface scroll — wheel notches at the drag point — instead of a camera
-	// rotate. This is the Android-safe snapshot counterpart to isEngineScrollableAt (an off-thread point
-	// hit-test iOS calls synchronously per touch); Android's UI thread cannot make that per-touch JNI call into
-	// HotSpot (jvm_bootstrap's UI-thread natives own no HotSpot env), so it consumes this pre-snapshotted rect
-	// array exactly as DRAG-1b does reorderPaneBounds. Packed [x,y,w,h] per rect, capped at MAX_SCROLLABLE_RECTS.
-	// iOS never reads it, so only Android arms the walk (-Drunelite.bridge.scrollrects=true); elsewhere the array
+	// DRAG-2: bounds of ALL visible, overflowing scroll-layer widgets, snapshotted on the client thread so a
+	// shell can hit-test a one-finger drag's START point lock-free and route it as an interface scroll (wheel
+	// notches at the drag point) instead of a camera rotate. Widgets can only be read on the client thread, so
+	// both shells go through this: Android reads the getSnapshot payload's scrollRects (its UI-thread natives own
+	// no HotSpot env), iOS asks isEngineScrollableAt. Packed [x,y,w,h] per rect in shown px, capped at
+	// MAX_SCROLLABLE_RECTS. Both shells arm the walk (-Drunelite.bridge.scrollrects=true); elsewhere the array
 	// stays empty. A drag-start hit-test doesn't need 50 Hz freshness, so the walk runs at most every
 	// SCROLL_RECTS_MS.
 	private static final int MAX_SCROLLABLE_RECTS = 16;
@@ -2792,7 +2802,7 @@ public final class JavaBridge
 			if (roots != null)
 			{
 				out = new int[MAX_SCROLLABLE_RECTS * 4];
-				final int[] budget = {6000};   // same node cap as isEngineScrollableAt's off-thread walk
+				final int[] budget = {6000};   // node cap: a huge open interface can't stall the frame
 				for (final Widget root : roots)
 				{
 					collectScrollable(root, out, n, 0, budget);
@@ -2821,10 +2831,9 @@ public final class JavaBridge
 		}
 	}
 
-	// DRAG-2: structural copy of scrollableUnder/scrollableChild that APPENDS every visible overflowing
-	// scroll-layer rect into out/n (packed [x,y,w,h]) instead of short-circuiting on the first point-match, and
-	// stops once out is full. Same depth cap + node budget as the point-hit-test walk; children can render
-	// outside a parent's bounds, so it doesn't prune on parent bounds.
+	// DRAG-2: APPENDS every visible overflowing scroll-layer rect into out/n (packed [x,y,w,h]) and stops once out
+	// is full. Depth cap + node budget bound the cost; children can render outside a parent's bounds, so it doesn't
+	// prune on parent bounds.
 	private static void collectScrollable(Widget w, int[] out, int[] n, int depth, int[] budget)
 	{
 		if (w == null || depth > 24 || budget[0]-- <= 0 || n[0] >= out.length || w.isHidden())
@@ -2862,12 +2871,11 @@ public final class JavaBridge
 
 	/**
 	 * DRAG-2: bounds of all visible, overflowing scroll-layer widgets, packed as {@code [x,y,w,h]} per rect in
-	 * canvas px (capped at {@value #MAX_SCROLLABLE_RECTS}). This is the Android-safe snapshot counterpart to
-	 * {@link #isEngineScrollableAt} (an off-thread point hit-test iOS calls synchronously per touch): Android's
-	 * UI thread cannot make that per-touch JNI call into HotSpot, so it hit-tests this pre-snapshotted array
-	 * lock-free (published in the getSnapshot payload as {@code scrollRects}), mirroring how DRAG-1b's
-	 * {@link #getReorderPaneBounds} is consumed. Empty = no scrollable interface visible, or the snapshot is not
-	 * armed ({@code -Drunelite.bridge.scrollrects}, Android only). Refreshed at most every 100 ms.
+	 * shown px (capped at {@value #MAX_SCROLLABLE_RECTS}). Android hit-tests this array lock-free (published in
+	 * the getSnapshot payload as {@code scrollRects}), mirroring how DRAG-1b's {@link #getReorderPaneBounds} is
+	 * consumed; iOS asks {@link #isEngineScrollableAt}, which reads the same array. Empty = no scrollable interface
+	 * visible, or the snapshot is not armed ({@code -Drunelite.bridge.scrollrects}, set by both shells).
+	 * Refreshed at most every 100 ms.
 	 */
 	public static int[] getScrollableRects()
 	{
@@ -2875,81 +2883,25 @@ public final class JavaBridge
 	}
 
 	/**
-	 * SCROLL-SPIKE: true if a scrollable engine interface widget is under the canvas point (x,y) — a visible widget
-	 * whose scroll layer overflows ({@code getScrollHeight() > getHeight()}) and whose bounds contain the point.
-	 * The native shell calls this at pan-begin to decide whether a one-finger drag should scroll an open interface
-	 * (bank / GE / quest list / settings / collection log …) — emitted as wheel notches the engine routes to the
-	 * hovered scrollable, exactly like the desktop mouse wheel — instead of rotating the camera. Returning false
-	 * leaves the drag a camera pan, so a drag over the bare viewport never scroll-leaks into a zoom.
+	 * True if the shown point {@code (x,y)} lies on the scrollable area of an open window: one of the
+	 * {@link #getScrollableRects} the client thread last published (a visible widget whose scroll layer overflows).
+	 * The iOS shell asks at pan-begin whether a one-finger drag should scroll an open interface (bank, skill guide,
+	 * emotes, quest list, settings, collection log ...), as wheel notches at the drag point, instead of rotating
+	 * the camera. False leaves the drag a camera pan, so a drag over the bare viewport never turns into a zoom.
 	 *
-	 * <p>THREADING (spike caveat): this walks the live widget tree off the client thread (called straight from the
-	 * JNI pan-begin), so a concurrent client-thread relayout can give a torn bounds read. It is a gating decision
-	 * only (worst case: one mis-gated drag), is fully {@code try/catch(Throwable)}-guarded, fails safe to
-	 * {@code false}, and the node budget caps the walk so a huge open interface can't stutter pan-begin. The
-	 * production path would snapshot the scrollable rects on the client thread each frame (cf.
-	 * {@link #snapshotInventoryBounds}) and hit-test them lock-free here.
+	 * <p>It reads the snapshot and never the widget tree. It is called from the native UI thread, and the
+	 * gamepack throws {@code IllegalStateException("must be called on client thread")} from {@code Widget.isHidden}
+	 * there: the old walk caught that and answered false for every point, so no drag on iOS ever scrolled a window.
+	 * The rects are at most {@value #SCROLL_RECTS_MS} ms old, plenty for a drag that has only just begun.
 	 */
 	public static boolean isEngineScrollableAt(int shownX, int shownY)
 	{
-		// Large portrait: a point on the chat or minimap copy goes to the real one in the hidden strip.
-		final long at = HudStrip.toEngine(shownX, shownY);
-		final int x = HudStrip.x(at), y = HudStrip.y(at);
-		final Client c = client;
-		if (c == null)
+		final int[] r = scrollableRects;
+		for (int i = 0; i + 3 < r.length; i += 4)
 		{
-			return false;
-		}
-		try
-		{
-			final Widget[] roots = c.getWidgetRoots();
-			if (roots != null)
+			if (shownX >= r[i] && shownX < r[i] + r[i + 2] && shownY >= r[i + 1] && shownY < r[i + 1] + r[i + 3])
 			{
-				final int[] budget = {6000};   // node cap for the off-thread walk
-				for (final Widget root : roots)
-				{
-					if (scrollableUnder(root, x, y, 0, budget))
-					{
-						return true;
-					}
-				}
-			}
-		}
-		catch (Throwable t)
-		{
-			BridgeFaults.note("JavaBridge.isEngineScrollableAt", t);
-		}
-		return false;
-	}
-
-	// SCROLL-SPIKE: bounded recursive search for a visible, overflowing scroll layer containing (x,y). Children can
-	// render outside a parent's own bounds, so the walk doesn't prune on parent bounds — the node budget + depth cap
-	// bound the cost instead.
-	private static boolean scrollableUnder(Widget w, int x, int y, int depth, int[] budget)
-	{
-		if (w == null || depth > 24 || budget[0]-- <= 0 || w.isHidden())
-		{
-			return false;
-		}
-		final Rectangle b = w.getBounds();
-		if (b != null && b.contains(x, y) && w.getHeight() > 0 && w.getScrollHeight() > w.getHeight())
-		{
-			return true;
-		}
-		return scrollableChild(w.getStaticChildren(), x, y, depth, budget)
-			|| scrollableChild(w.getDynamicChildren(), x, y, depth, budget)
-			|| scrollableChild(w.getNestedChildren(), x, y, depth, budget);
-	}
-
-	private static boolean scrollableChild(Widget[] kids, int x, int y, int depth, int[] budget)
-	{
-		if (kids != null)
-		{
-			for (final Widget k : kids)
-			{
-				if (scrollableUnder(k, x, y, depth + 1, budget))
-				{
-					return true;
-				}
+				return true;
 			}
 		}
 		return false;
