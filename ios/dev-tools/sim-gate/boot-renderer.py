@@ -36,7 +36,10 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "tools/mcp"))
 import harness_server as hs  # noqa: E402  (simulator helpers)
 
-LAUNCH_ARGS = ["-RMAutoPlay", "YES", "-RMSkipLogin", "YES"]
+# Landscape is pinned as in screendriver.py: a simulator left on Game settings > Screen > Portrait draws the app
+# portrait inside the landscape window, so CANVAS_BAND lands on the logo and login box, which never move, and the
+# 117HD motion check fails on a healthy picture.
+LAUNCH_ARGS = ["-screen.portrait", "NO", "-screen.auto", "NO", "-RMAutoPlay", "YES", "-RMSkipLogin", "YES"]
 HD_AT_LOGIN = ["-RM117HDAtLogin", "YES"]
 COOKIE = "Library/Application Support/hd-boot-armed"
 FIRST_FRAME = {
