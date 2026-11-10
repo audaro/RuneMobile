@@ -56,6 +56,15 @@ log()  { printf '\n\033[1;35m>> %s\033[0m\n' "$*"; }
 die()  { printf '\033[1;31m!! %s\033[0m\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# The commit both apps stamp (iOS Info.plist RMSourceCommit, Android BuildConfig.SOURCE_COMMIT). Game updates are
+# published per exact commit (tools/game-update/), so a build from a tree with modified tracked files stamps
+# "<sha>-dirty" and takes none. Say so loudly: a stable release from a dirty tree can never be updated.
+SOURCE_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+if [ "$SOURCE_COMMIT" != unknown ] && [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+	SOURCE_COMMIT="$SOURCE_COMMIT-dirty"
+	printf '::warning::tracked files are modified: this build stamps %s and takes no game updates\n' "$SOURCE_COMMIT" >&2
+fi
+
 # ── Version scheme ────────────────────────────────────────────────────────────────────────────────────
 # Semver base comes from android/app/build.gradle.kts (single source of truth). Rolling CI builds append a
 # -master.<N> suffix and use a versionCode base of 1_000_000 + N so every merge-built APK is strictly newer
@@ -198,6 +207,8 @@ if wants ios; then
 		MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$IOS_BUILD" build || die "xcodebuild failed"
 	APP="$DD/Build/Products/Release-iphoneos/RuneMobile.app"
 	[ -d "$APP" ] || die "no .app produced at $APP"
+	STAMPED="$(/usr/libexec/PlistBuddy -c "Print :RMSourceCommit" "$APP/Info.plist" 2>/dev/null || echo none)"
+	[ "$STAMPED" = "$SOURCE_COMMIT" ] || die "the app stamps source commit '$STAMPED', expected '$SOURCE_COMMIT' (app/scripts/stamp-source-commit.sh)"
 
 	# 4) Package Payload/*.app -> IPA and stamp the version. xcodebuild already took MARKETING_VERSION (Info.plist
 	#    reads it); the stamp pins the packaged plist whatever the build settings did. SideStore re-signs on
@@ -296,6 +307,8 @@ fi
 	printf 'VERSION=%q\n'        "$VERSION"
 	printf 'BUILD_NUMBER=%q\n'   "$BUILD_NUMBER"
 	printf 'GIT_SHA=%q\n'        "$GIT_SHA"
+	# The full commit both apps stamp, which game-update sets are published for.
+	printf 'SOURCE_COMMIT=%q\n'  "$SOURCE_COMMIT"
 	# The upstream RuneLite the jars were built from, so a published build states which client it IS.
 	printf 'RUNELITE_VERSION=%q\n' "$JARVER"
 	printf 'APK_FINGERPRINT=%q\n' "$APK_FP"

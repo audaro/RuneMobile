@@ -44,6 +44,18 @@ FEED="$DIST/altstore.json"
 # and the UDID of every provisioned device. A re-signed binary can also keep the old certificate in its signature
 # space. SideStore/AltStore re-sign on install and never need either, so a public IPA must carry neither.
 "$ROOT/tools/ci/check-ipa-clean.sh" "$IPA" || die "$IPA carries the developer's identity — rebuild with IOS_ADHOC=1 (the default)"
+# Game updates are published for the exact commit a release's apps stamp (tools/game-update/). A release from a
+# dirty tree, or one that predates the stamp, could never take one, so refuse it here. The tag is then created on
+# that commit, which is what the publisher builds the next game-update set from.
+[[ "${SOURCE_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || die "the build stamps source commit '${SOURCE_COMMIT:-none}', not a clean commit: rebuild from a clean tree"
+IPA_COMMIT="$(python3 - "$IPA" <<'PY'
+import plistlib, sys, zipfile
+z = zipfile.ZipFile(sys.argv[1])
+name = next(n for n in z.namelist() if n.endswith(".app/Info.plist") and n.count("/") == 2)
+print(plistlib.loads(z.read(name)).get("RMSourceCommit", "none"))
+PY
+)"
+[ "$IPA_COMMIT" = "$SOURCE_COMMIT" ] || die "$IPA stamps '$IPA_COMMIT', manifest.env says '$SOURCE_COMMIT'"
 [ -f "$FEED" ] || RELEASE_TAG="$TAG" "$ROOT/tools/ci/make-altstore-source.sh" "$DIST"
 
 # The manifest must describe THIS release, not a leftover from the previous build sitting in dist/.
@@ -69,9 +81,9 @@ else
 	NEW_RELEASE=1
 	echo ">> creating $TAG on $REPO with ${#ASSETS[@]} assets"
 	if [ -n "$NOTES" ]; then
-		gh release create "$TAG" "${ASSETS[@]}" --repo "$REPO" --title "RuneMobile $VERSION" --notes-file "$NOTES" --latest
+		gh release create "$TAG" "${ASSETS[@]}" --repo "$REPO" --title "RuneMobile $VERSION" --notes-file "$NOTES" --latest --target "$SOURCE_COMMIT"
 	else
-		gh release create "$TAG" "${ASSETS[@]}" --repo "$REPO" --title "RuneMobile $VERSION" --generate-notes --latest
+		gh release create "$TAG" "${ASSETS[@]}" --repo "$REPO" --title "RuneMobile $VERSION" --generate-notes --latest --target "$SOURCE_COMMIT"
 	fi
 fi
 
