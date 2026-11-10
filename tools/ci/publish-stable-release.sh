@@ -72,8 +72,22 @@ PY
 ASSETS=("$APK" "$IPA" "$FEED")
 [ -f "$DIST/runelite-jit.js" ] && ASSETS+=("$DIST/runelite-jit.js")
 
+# The tag must name the commit the apps stamp. `--target` below only applies when it creates the tag, so a tag
+# pushed earlier, or a re-upload into an existing release, could otherwise leave it on other source than the
+# binaries, and the next game-update set would be built from the wrong commit.
+tag_commit() {	# the commit $TAG names on $REPO, empty when there is no such tag; fails if GitHub can't say
+	local n
+	n="$(gh api "repos/$REPO/git/matching-refs/tags/$TAG" --jq "[.[] | select(.ref == \"refs/tags/$TAG\")] | length")" || return 1
+	[ "$n" = 0 ] || gh api "repos/$REPO/commits/$TAG" --jq .sha
+}
+TAG_COMMIT="$(tag_commit)" || die "could not read tag $TAG on $REPO"
+if [ -n "$TAG_COMMIT" ] && [ "$TAG_COMMIT" != "$SOURCE_COMMIT" ]; then
+	die "tag $TAG on $REPO points at $TAG_COMMIT, but the build stamps $SOURCE_COMMIT: move the tag or rebuild from it"
+fi
+
 NEW_RELEASE=0
 if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+	[ -n "$TAG_COMMIT" ] || die "release $TAG exists but its tag could not be resolved on $REPO"
 	echo ">> $TAG exists — uploading assets and marking latest"
 	gh release upload "$TAG" "${ASSETS[@]}" --repo "$REPO" --clobber
 	gh release edit "$TAG" --repo "$REPO" --latest --prerelease=false
