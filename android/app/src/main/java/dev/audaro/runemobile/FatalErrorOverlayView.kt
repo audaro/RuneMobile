@@ -28,6 +28,7 @@ class FatalErrorOverlayView(
     var onShareLogs: (() -> Unit)? = null
 
     private var active = false
+    private var code = ""
     private var title = ""
     private var bodyLines: List<String> = emptyList()
 
@@ -101,6 +102,7 @@ class FatalErrorOverlayView(
         if (active) return false
         active = true
         isClickable = true
+        this.code = code
         val copy = copyFor(code)
         title = copy.first
         bodyLines = copy.second
@@ -109,6 +111,16 @@ class FatalErrorOverlayView(
     }
 
     val isActive: Boolean get() = active
+
+    /** Replace the body while the card is up (the out-of-date card following a game update). */
+    fun setBody(lines: List<String>) {
+        if (!active || lines == bodyLines) return
+        bodyLines = lines
+        invalidate()
+    }
+
+    /** Back to the code's own copy. */
+    fun resetBody() = setBody(copyFor(code).second)
 
     // Per-code copy. The engine's js5 tokens are distinct: js5connect_outofdate = the server refused this
     // client's revision (a weekly game update; only a rebuilt app fixes it); js5connect = four failed

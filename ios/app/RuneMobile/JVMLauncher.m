@@ -1,5 +1,6 @@
 #import "JVMLauncher.h"
 #import "RMGameAudio.h"
+#import "RMGameUpdate.h"
 #import "RMGameSettings.h"
 #import "RMMemoryTrail.h"
 #import <dlfcn.h>
@@ -2232,6 +2233,13 @@ static void RMEnsureResizableDisplayMode(NSString *rlHome, JVMLogSink log) {
     // §6.2: the shaded RuneLite client jar (all deps) + a writable RuneLite home for the gamepack
     // cache, and the headless capture dir (HeadlessCapture dumps mainBufferProvider PNGs there).
     NSString *shadedPath = [[NSBundle mainBundle] pathForResource:@"client-shaded" ofType:@"jar"];
+    // Game updates: a downloaded set for a newer game revision, re-verified here, replaces all three jars together
+    // (RMGameUpdate.h). nil = the bundled jars.
+    RMGameUpdateSet *gameSet = self.routecL1Mode ? nil : [[RMGameUpdate shared] setForBootWithLog:log];
+    if (gameSet) {
+        shadedPath = [gameSet pathForJar:@"client-shaded.jar"];
+        jarPath = [gameSet pathForJar:@"probes.jar"];
+    }
     NSString *classpath;
     if (self.routecL1Mode) {
         // L1 kill-test: routec-l1.jar (facade-native + RouteCL1Probe) ALONE — no shaded jar, no LWJGL, so the
@@ -2246,7 +2254,8 @@ static void RMEnsureResizableDisplayMode(NSString *rlHome, JVMLogSink log) {
         // "renderers as plugins" model loads HdPlugin (no-start) into the panel in EVERY mode so 117HD is a
         // selectable plugin, so its classes must always be resolvable. It carries no lwjgl (the facade ships in
         // the shaded jar); RLHDStarter starts it only when 117HD is the active renderer.
-        NSString *rlhdPath = [[NSBundle mainBundle] pathForResource:@"client-rlhd" ofType:@"jar"];
+        NSString *rlhdPath = gameSet ? [gameSet pathForJar:@"client-rlhd.jar"]
+                                     : [[NSBundle mainBundle] pathForResource:@"client-rlhd" ofType:@"jar"];
         if (rlhdPath) {
             classpath = [NSString stringWithFormat:@"%@:%@", classpath, rlhdPath];
             log([NSString stringWithFormat:@"[jvm] rlhd jar on classpath = %@", rlhdPath]);
@@ -2411,6 +2420,10 @@ static void RMEnsureResizableDisplayMode(NSString *rlHome, JVMLogSink log) {
     // untraceable jetsam kill — a clean exit lands in the normal relaunch flow and leaves an hs_err
     // trail. (Kept out of the literal above: any edit inside it makes clang-format reflow the block.)
     [opts addObject:@"-XX:+ExitOnOutOfMemoryError"];
+    // A game-update set built after a RuneLite release carries its own Plugin Hub pin. A later -D wins, so this
+    // overrides the bundled pin in the literal above.
+    if (gameSet.pluginHubVersion)
+        [opts addObject:[NSString stringWithFormat:@"-Drunelite.pluginhub.version=%@", gameSet.pluginHubVersion]];
     // A VM crash report (hs_err) where "Share logs" finds it. Without this HotSpot tries the working directory
     // ("/", read-only) and then /tmp, which an app can't write either, so a JVM crash left nothing behind.
     // %p keeps one file per crash (HotSpot won't overwrite one); the oldest beyond three are removed here.
@@ -2642,6 +2655,9 @@ static void RMEnsureResizableDisplayMode(NSString *rlHome, JVMLogSink log) {
     if (jitInApp)
         jitServeDisarm(&jitPorts, log);
     if (rc != JNI_OK || !vm || !env) { log([NSString stringWithFormat:@"[jvm] FATAL JNI_CreateJavaVM rc=%d", rc]); return -14; }
+    // Arm the set's boot cookie only now: a death inside JNI_CreateJavaVM is the JIT path's, not the jars'.
+    if (gameSet)
+        [[RMGameUpdate shared] armBoot:gameSet];
     // Publish the VM so the main thread's live-blit + touch bridge can attach into it (atomic store —
     // the main thread loads it with atomic_load in ensureBridge).
     atomic_store(&gVM, vm);

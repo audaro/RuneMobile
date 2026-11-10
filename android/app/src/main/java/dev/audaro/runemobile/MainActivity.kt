@@ -390,6 +390,14 @@ class MainActivity : AppCompatActivity() {
     // after a weekly OSRS update, js5io, crash). Terminal; its button relaunches the process.
     private lateinit var fatalErrorOverlay: FatalErrorOverlayView
 
+    // Game updates (GameUpdate.kt): the booted set reached its first frame; the out-of-date card is following the
+    // update (checks, downloads, then restarts onto the new set by itself).
+    private var gameUpdateSettled = false
+    private var outOfDateFollowing = false
+    private var outOfDateRestarting = false
+    private var outOfDateNextCheckMs = 0L
+    private var outOfDateLastBodyMs = 0L
+
     // PERF-MEMORY-THERMAL-01: throttles the 117HD scene scale under thermal pressure (armed only on a 117HD boot).
     private var thermalGovernor: ThermalGovernor? = null
 
@@ -494,6 +502,11 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "MainActivity"
         private val booted = AtomicBoolean(false)
+
+        // Game updates on the out-of-date card: how often it checks for a published set, and how long it shows
+        // "ready" before restarting onto it.
+        private const val OUT_OF_DATE_RECHECK_MS = 300_000L
+        private const val OUT_OF_DATE_RESTART_DELAY_MS = 1_500L
 
         // World-map pan speed: multiplier on the grab-the-map finger delta. 1.0 = strict 1:1 (feels slow once the
         // map is magnified to fullscreen); >1 covers more ground per swipe. Tune to taste.
@@ -1069,13 +1082,7 @@ class MainActivity : AppCompatActivity() {
         // the same clean-boot relaunch the renderer restarts use (the embedded VM is one-per-process).
         fatalErrorOverlay =
             FatalErrorOverlayView(this).apply {
-                onRestart = {
-                    val i = packageManager.getLaunchIntentForPackage(packageName)
-                    i?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                    startActivity(i)
-                    finishAffinity()
-                    Runtime.getRuntime().exit(0)
-                }
+                onRestart = { relaunchApp() }
                 onShareLogs = { Diagnostics.share(this@MainActivity) }
             }
         // UX-DISCRETE-01 / ENH-B06: the "Hopping…" scrim (non-interactive; armed at the hop trigger sites, hidden
@@ -1940,6 +1947,10 @@ class MainActivity : AppCompatActivity() {
                 startAutoGpuWatchdog()
                 Log.i(TAG, "auto-GPU: armed first-boot fallback cookie for pref '$prefRenderer'")
             }
+            // Game updates: look for newer game files for this build in the background; the boot below never waits
+            // for it. An offer downloads for the next launch, or the out-of-date card restarts onto it.
+            GameUpdate.init(app)
+            GameUpdate.startLaunchCheck { Log.i(TAG, it) }
             thread(name = "jvm-boot") { bootJvm(app, censusMode, gpu = gpuMode && !rlhdMode, rlhd = rlhdMode) }
             // PERF-MEMORY-THERMAL-01: arm the thermal governor for a 117HD boot (no-op for cpu/gpu). It throttles
             // the 117HD sceneResolutionScale under thermal pressure and restores it on cooldown; all config I/O is
@@ -2161,6 +2172,110 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             Log.w(TAG, "auto-GPU: renderer presented no frames within 240s -> crash-cookie left armed (CPU next launch)")
+        }
+    }
+
+    /** A clean relaunch of the process (the embedded VM is one-per-process). */
+    private fun relaunchApp() {
+        val i = packageManager.getLaunchIntentForPackage(packageName)
+        i?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        startActivity(i)
+        finishAffinity()
+        Runtime.getRuntime().exit(0)
+    }
+
+    private var fakeFatalPolledMs = 0L
+    private var pendingFakeFatal: String? = null
+
+    // Debug only: a fatal card on demand for the game-update tests. Write an engine code (such as
+    // error_game_js5connect_outofdate) into the fake-fatal marker; it is read once and removed. Polled once a second.
+    private fun debugFakeFatal(): String? {
+        val now = SystemClock.uptimeMillis()
+        if (now - fakeFatalPolledMs < 1000) return null
+        fakeFatalPolledMs = now
+        val f = File(getExternalFilesDir(null), "fake-fatal")
+        val code = runCatching { f.readText().trim() }.getOrNull()?.takeIf { it.isNotEmpty() }
+        if (code != null) f.delete()
+        return code
+    }
+
+    /** The out-of-date card follows the game update instead of only telling the player to install a build. */
+    private fun startOutOfDateFollow() {
+        if (!GameUpdate.enabled) return // a dev build keeps the original copy
+        Log.i(TAG, "[game-update] outofdate card: following the game update")
+        outOfDateFollowing = true
+        outOfDateNextCheckMs = 0
+        fatalErrorOverlay.setBody(listOf("The game moved to a new version.", "Checking for new game files…"))
+        updateOutOfDateCard()
+    }
+
+    // Per frame while the card follows the update (twice a second): restart once a newer set is installed, show the
+    // download's progress, and check again every five minutes until a set for this build is published. A restart
+    // only happens onto a set this process isn't running, so it can't loop.
+    private fun updateOutOfDateCard() {
+        if (outOfDateRestarting) return
+        val now = SystemClock.uptimeMillis()
+        if (now - outOfDateLastBodyMs < 500) return
+        outOfDateLastBodyMs = now
+        when {
+            GameUpdate.readyForNextLaunch -> {
+                outOfDateRestarting = true
+                fatalErrorOverlay.setBody(listOf("The new game files are ready.", "Restarting the app…"))
+                Log.i(TAG, "[game-update] outofdate card: the new set is installed, restarting onto it")
+                fatalErrorOverlay.postDelayed({ relaunchApp() }, OUT_OF_DATE_RESTART_DELAY_MS)
+            }
+
+            GameUpdate.downloading -> {
+                val total = GameUpdate.downloadTotal
+                val pct = if (total > 0) (GameUpdate.downloadDone * 100 / total).toInt() else 0
+                fatalErrorOverlay.setBody(
+                    listOf("Downloading the new game files ($pct%).", "The app restarts by itself when", "they're ready."),
+                )
+            }
+
+            now >= outOfDateNextCheckMs -> {
+                val every = GameUpdate.devRecheckSeconds.takeIf { it > 0 }?.times(1000) ?: OUT_OF_DATE_RECHECK_MS
+                outOfDateNextCheckMs = now + every
+                GameUpdate.check { r, offer, detail -> onOutOfDateCheck(r, offer, detail) }
+            }
+        }
+    }
+
+    // The out-of-date card's check came back (main thread): download an offer, or say what happens next.
+    private fun onOutOfDateCheck(
+        r: GameUpdate.CheckResult,
+        offer: GameUpdateRules.GameSet?,
+        detail: String,
+    ) {
+        Log.i(TAG, "[game-update] outofdate card check: $detail")
+        when (r) {
+            GameUpdate.CheckResult.OFFER -> {
+                if (offer != null && !GameUpdate.downloading) {
+                    Log.i(TAG, "[game-update] downloading set ${offer.id} to restart onto")
+                    GameUpdate.download(offer, null) { ok, d ->
+                        Log.i(TAG, "[game-update] download ${if (ok) "done" else "failed"}: $d")
+                    }
+                }
+            }
+
+            // Only a new app build helps: the card's original copy says so.
+            GameUpdate.CheckResult.NO_SET, GameUpdate.CheckResult.DISABLED -> {
+                fatalErrorOverlay.resetBody()
+            }
+
+            else -> {
+                if (!GameUpdate.readyForNextLaunch) {
+                    fatalErrorOverlay.setBody(
+                        listOf(
+                            "The game moved to a new version. The app",
+                            "gets the new game files by itself, usually",
+                            "within a few hours. Keep it open and it",
+                            "restarts when they're ready, or close it",
+                            "and try again later.",
+                        ),
+                    )
+                }
+            }
         }
     }
 
@@ -4024,6 +4139,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateChrome() {
         if (!::chromeOverlay.isInitialized) return
+        // Game updates, every frame and ahead of the signature short-circuit below: under the out-of-date card the
+        // engine is dead, so nothing it publishes changes any more, yet the card must follow the download.
+        if (outOfDateFollowing) updateOutOfDateCard()
+        if (BuildConfig.DEBUG && pendingFakeFatal == null) pendingFakeFatal = debugFakeFatal()
         // One-shot: once the engine has captured the tab/stone/chat sprites from the live cache (after login),
         // hand them to the native chrome + cache them for next boot. Latched, so this is inert after it lands.
         if (!tabSpritesApplied) {
@@ -4087,7 +4206,8 @@ class MainActivity : AppCompatActivity() {
             ::layoutSwitchButton.isInitialized &&
                 layoutUnsupportedSinceMs != 0L &&
                 (layoutSwitchSentMs != 0L || layoutSwitchButton.visibility != View.VISIBLE)
-        val timedPending = (::splashOverlay.isInitialized && splashOverlay.isActive) || hopArmed || layoutTimed
+        val timedPending =
+            (::splashOverlay.isInitialized && splashOverlay.isActive) || hopArmed || layoutTimed || pendingFakeFatal != null
         if (!timedPending && sig.contentEquals(lastChromeSig)) return
         chromeSig = lastChromeSig
         lastChromeSig = sig
@@ -4145,10 +4265,20 @@ class MainActivity : AppCompatActivity() {
         // FATAL-1: latch the engine-fatal card on the snapshot's fatal flag. The bridge makes fatal outrank
         // reconnecting/sessionExpired (a fatal is not recoverable), so the overlays never co-fire; the card
         // never hides (terminal for this process — its button relaunches).
-        if (::fatalErrorOverlay.isInitialized && o?.optBoolean("fatalError") == true) {
-            if (fatalErrorOverlay.showFatal(o.optString("fatalCode", "unknown"))) {
-                Log.i(TAG, "fatal1: engine-fatal card shown (code=${o.optString("fatalCode")})")
+        val fakeFatal = pendingFakeFatal.also { pendingFakeFatal = null }
+        if (::fatalErrorOverlay.isInitialized && (o?.optBoolean("fatalError") == true || fakeFatal != null)) {
+            val code = fakeFatal ?: o?.optString("fatalCode", "unknown") ?: "unknown"
+            if (fatalErrorOverlay.showFatal(code)) {
+                Log.i(TAG, "fatal1: engine-fatal card shown (code=$code)")
+                // The engine ran and reached the game servers, so the booted set works: an outage or a revision
+                // bump must never count against it.
+                if (code.startsWith("error_game_js5")) GameUpdate.settleBoot()
+                if (code == "error_game_js5connect_outofdate") startOutOfDateFollow()
             }
+        }
+        if (!gameUpdateSettled && JvmLauncher.frameWidth() > 0) {
+            gameUpdateSettled = true
+            GameUpdate.settleBoot()
         }
         // UX-ONBOARD-01: dismiss the cold-start splash only once the engine has actually PAINTED a frame
         // (frameWidth>0, a cheap native counter universal across renderers) — or the wall-clock failsafe fires. A
@@ -6003,9 +6133,16 @@ class MainActivity : AppCompatActivity() {
             )
             return
         }
+        // Game updates: a downloaded, re-verified set of the same three jars replaces the APK's (GameUpdate.kt).
+        GameUpdate.init(app)
+        val gameSet = GameUpdate.setForBoot { Log.i(TAG, it) }
         val classpath =
-            (listOf(clientJar) + listOfNotNull(rlhdJar) + listOf("probes.jar"))
-                .joinToString(":") { File(jvmDir, it).absolutePath }
+            if (gameSet != null) {
+                listOf("gpu", "rlhd", "probes").joinToString(":") { gameSet.jar(it).absolutePath }
+            } else {
+                (listOf(clientJar) + listOfNotNull(rlhdJar) + listOf("probes.jar"))
+                    .joinToString(":") { File(jvmDir, it).absolutePath }
+            }
         val libraryPath = File(javaHome, "lib").absolutePath
 
         // A writable RuneLite home + headless capture dir (the gamepack cache + PNG fallback evidence).
@@ -6295,6 +6432,10 @@ class MainActivity : AppCompatActivity() {
         JvmLauncher.setStdioRedirect(BuildConfig.DEBUG)
         JvmLauncher.setStdioProbeLines(perfProbe)
 
+        // Count this boot against the set before the VM starts: a set without a class the boot needs fails inside
+        // startJvm itself (rc -13), and that must count too. The first frame, or a game-server error card, clears
+        // it. (iOS arms after VM creation instead, so a failed JIT attach there never counts against a set.)
+        if (gameSet != null) GameUpdate.armBoot(gameSet)
         Log.i(TAG, "starting HotSpot: DeviceHeadlessBoot, cp=$classpath")
         val rc =
             JvmLauncher.startJvm(

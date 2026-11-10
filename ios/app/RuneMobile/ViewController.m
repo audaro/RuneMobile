@@ -11,6 +11,7 @@
 #import "RMKeyboardDismiss.h"
 #import "RMResidency.h"
 #import "RMGameSettings.h"
+#import "RMGameUpdate.h"
 #import "RMHeat.h"
 #import "RMHeatNotice.h"
 #import "RouteCBridge.h"            // GPU Route C bridge (backend selected by RC_BACKEND_ANGLE in the build)
@@ -269,6 +270,17 @@ static NSString *RMPasteLine(NSString *s) {
         s = [s substringToIndex:[s rangeOfComposedCharacterSequenceAtIndex:80].location];
     return s;
 }
+
+// The cover's game-update phase (coverUpdatePhase). Only Checking (for kCoverUpdatePlayWait) and Downloading hold a
+// Play tap; Failed only changes the status line.
+typedef NS_ENUM(NSInteger, RMCoverUpdate) {
+    RMCoverUpdateIdle,
+    RMCoverUpdateChecking,
+    RMCoverUpdateDownloading,
+    RMCoverUpdateFailed,
+};
+static const CFTimeInterval kCoverUpdatePlayWait = 4.0;       // longest a Play tap waits for the check
+static const NSTimeInterval kOutOfDateRecheckSeconds = 300.0; // the outofdate card's re-check interval
 
 @interface ViewController () <RMHeatScaleStore, UITextFieldDelegate, UITableViewDataSource, UITableViewDelegate, UIGestureRecognizerDelegate, SFSafariViewControllerDelegate, UNUserNotificationCenterDelegate, AVPictureInPictureControllerDelegate, AVPictureInPictureSampleBufferPlaybackDelegate, UISearchBarDelegate, OverlayEditHudHost> {
     // Game-canvas centres of each tab stone (updated each chrome refresh), used to proxy a tap onto the live
@@ -653,6 +665,15 @@ static NSString *RMPasteLine(NSString *s) {
 @property (nonatomic, strong) UILabel *fatalErrorTitle;
 @property (nonatomic, strong) UILabel *fatalErrorBody;
 @property (nonatomic, assign) BOOL fatalErrorShown;
+// Game updates (RMGameUpdate.h). The cover checks before the VM exists: a required set downloads there and a Play tap
+// waits for it (coverUpdateHoldsPlay). The outofdate card follows the same update for a VM that is already dead.
+@property (nonatomic, assign) NSInteger coverUpdatePhase; // RMCoverUpdate*
+@property (nonatomic, assign) CFTimeInterval coverUpdateCheckStartedAt;
+@property (nonatomic, copy) NSString *coverUpdateText;  // the cover's status line while the phase isn't idle
+@property (nonatomic, assign) BOOL coverPlayQueued;     // a Play tap is waiting for the check or the download
+@property (nonatomic, assign) BOOL gameUpdateSettled;   // this boot reached its first frame
+@property (nonatomic, assign) BOOL outOfDateCardActive; // the outofdate card is up and following the update
+@property (nonatomic, strong) NSTimer *outOfDateRecheckTimer;
 @property (nonatomic, assign) BOOL layoutNoticeShown; // UX-ONBOARD-02: launch layout hint, once per process
 @property (nonatomic, assign) BOOL jitStartupChecked; // the last launch's JIT-startup record was read (once per process)
 // One-tap layout switch (updateLayoutSwitch): the pill, the start of the current run of unsupported-layout frames
@@ -1257,6 +1278,7 @@ static NSString *const kRMDebugPipOffKey = @"RMDebugPipOff";
     // #1: the "Tap to Play" cover sits ABOVE everything (game, HUD veneers, panel dock, debug panel) so the
     // cold-start experience is the polished play screen, not the W1 scaffolding. Dismissed on launch.
     [self buildLaunchScreen];
+    [self startCoverGameUpdateCheck];
 
     // Immersive fullscreen (parity with Android's sticky edge-to-edge, MainActivity enterImmersive): hide the
     // status bar + home indicator so the game fills the whole screen with no clock/battery/signal chrome,
@@ -1582,11 +1604,201 @@ static NSString *const kLayoutNoticeBody =
     return [[NSFileManager defaultManager] fileExistsAtPath:[self hdBootCookiePath]];
 }
 
+#pragma mark - Game updates (cover + outofdate card)
+
+// On the cover, before the VM exists: ask for a newer set of jars for this build. A required one downloads now and the
+// game boots on it; any other downloads in the background for the next launch. Dev builds (no clean commit stamp)
+// skip all of it.
+- (void)startCoverGameUpdateCheck {
+    RMGameUpdate *gu = [RMGameUpdate shared];
+    if (!gu.enabled) {
+        [self appendLine:[NSString stringWithFormat:@"[game-update] off: build %@ is not a clean release commit",
+                                                    [RMGameUpdate shellCommit]]];
+        return;
+    }
+    self.coverUpdatePhase = RMCoverUpdateChecking;
+    self.coverUpdateCheckStartedAt = CACurrentMediaTime();
+    self.coverUpdateText = @"Checking for new game files…";
+    __weak ViewController *weakSelf = self;
+    // A queued tap stops waiting for the check after kCoverUpdatePlayWait, answered or not.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((kCoverUpdatePlayWait + 0.05) * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+                       [weakSelf releaseQueuedPlay];
+                   });
+    [gu check:^(RMGameUpdateCheckResult result, RMGameUpdateSet *offer, NSString *detail) {
+        ViewController *s = weakSelf;
+        if (!s)
+            return;
+        [s appendLine:[NSString stringWithFormat:@"[game-update] cover check: %@", detail]];
+        if (s.coverUpdatePhase == RMCoverUpdateChecking)
+            s.coverUpdatePhase = RMCoverUpdateIdle;
+        if (result == RMGameUpdateCheckOffer) {
+            // Required and the game not started yet: the cover waits. Otherwise it's for the next launch.
+            BOOL blocking = offer.required && !s.launched;
+            if (blocking) {
+                s.coverUpdatePhase = RMCoverUpdateDownloading;
+                s.coverUpdateText = @"Downloading new game files…";
+            }
+            [s downloadGameUpdate:offer blocking:blocking];
+        }
+        [s releaseQueuedPlay];
+    }];
+}
+
+- (BOOL)coverUpdateHoldsPlay {
+    if (self.coverUpdatePhase == RMCoverUpdateDownloading)
+        return YES;
+    return self.coverUpdatePhase == RMCoverUpdateChecking &&
+           CACurrentMediaTime() - self.coverUpdateCheckStartedAt < kCoverUpdatePlayWait;
+}
+
+// The cover's status line for the update, or nil for the normal "Ready to play". A check only shows once a tap waits
+// on it; a quick check is invisible.
+- (NSString *)coverUpdateStatusText {
+    switch (self.coverUpdatePhase) {
+        case RMCoverUpdateChecking:
+            return self.coverPlayQueued && [self coverUpdateHoldsPlay] ? self.coverUpdateText : nil;
+        case RMCoverUpdateDownloading:
+            return self.coverPlayQueued
+                       ? [self.coverUpdateText stringByAppendingString:@"\nThe game starts when they're ready."]
+                       : self.coverUpdateText;
+        case RMCoverUpdateFailed:
+            return self.coverUpdateText;
+        default:
+            return nil;
+    }
+}
+
+- (void)releaseQueuedPlay {
+    if (!self.coverPlayQueued || [self coverUpdateHoldsPlay] || self.launched)
+        return;
+    self.coverPlayQueued = NO;
+    [self appendLine:@"[game-update] replaying the queued Play tap"];
+    [self onPlayTapped];
+}
+
+- (void)downloadGameUpdate:(RMGameUpdateSet *)offer blocking:(BOOL)blocking {
+    __weak ViewController *weakSelf = self;
+    [self appendLine:[NSString stringWithFormat:@"[game-update] downloading set %@ (%.1f MB) %@", offer.setId,
+                                                offer.totalBytes / 1048576.0,
+                                                blocking ? @"before the game starts" : @"for the next launch"]];
+    [[RMGameUpdate shared] download:offer
+        progress:^(long long done, long long total) {
+            ViewController *s = weakSelf;
+            NSString *mb = [NSString stringWithFormat:@"%lld of %lld MB", done >> 20, MAX(total >> 20, 1LL)];
+            if (s && blocking && s.coverUpdatePhase == RMCoverUpdateDownloading)
+                s.coverUpdateText = [NSString stringWithFormat:@"Downloading new game files: %@", mb];
+            if (s.outOfDateCardActive)
+                s.fatalErrorBody.text = [NSString stringWithFormat:@"The game moved to a new version. RuneMobile is "
+                                                                   @"downloading its new game files: %@. Keep the "
+                                                                   @"app open.",
+                                                                   mb];
+        }
+        completion:^(BOOL ok, NSString *detail) {
+            ViewController *s = weakSelf;
+            if (!s)
+                return;
+            [s appendLine:[NSString stringWithFormat:@"[game-update] download %@: %@", ok ? @"done" : @"FAILED", detail]];
+            if (blocking && s.coverUpdatePhase == RMCoverUpdateDownloading) {
+                s.coverUpdatePhase = ok ? RMCoverUpdateIdle : RMCoverUpdateFailed;
+                s.coverUpdateText = ok ? nil : @"Couldn't download the new game files.\nTap to Play to try the current ones.";
+                [s releaseQueuedPlay];
+            }
+            if (s.outOfDateCardActive)
+                [s refreshOutOfDateCard:ok ? RMGameUpdateCheckCurrent : RMGameUpdateCheckFailed];
+        }];
+}
+
+// The first frame proves the booted set's jars load and the engine runs (RMGameUpdate's boot cookie).
+- (void)updateGameUpdateSettle {
+    if (self.gameUpdateSettled || [JVMLauncher renderedFrameWidth] <= 0)
+        return;
+    self.gameUpdateSettled = YES;
+    RMGameUpdate *gu = [RMGameUpdate shared];
+    [gu settleBoot];
+    if (gu.bootedSetId)
+        [self appendLine:[NSString stringWithFormat:@"[game-update] set %@ reached its first frame", gu.bootedSetId]];
+}
+
+// The outofdate card: this VM can't play any more, so the card follows a game update: ready (close and reopen),
+// downloading, or waiting for one to be published (re-checked every kOutOfDateRecheckSeconds).
+- (void)startOutOfDateCardUpdate {
+    if (self.outOfDateCardActive || ![RMGameUpdate shared].enabled)
+        return; // a dev build keeps the plain "install the newest build" copy
+    self.outOfDateCardActive = YES;
+    self.fatalErrorBody.text = @"The game moved to a new version. RuneMobile is checking for its new game files…";
+    [self appendLine:@"[game-update] outofdate card: following the game update"];
+    [self outOfDateCardCheck];
+}
+
+- (void)outOfDateCardCheck {
+    RMGameUpdate *gu = [RMGameUpdate shared];
+    if (gu.readyForNextLaunch) {
+        [self refreshOutOfDateCard:RMGameUpdateCheckCurrent];
+        return;
+    }
+    if (gu.downloading)
+        return; // its completion refreshes the card
+    __weak ViewController *weakSelf = self;
+    [gu check:^(RMGameUpdateCheckResult result, RMGameUpdateSet *offer, NSString *detail) {
+        ViewController *s = weakSelf;
+        if (!s)
+            return;
+        [s appendLine:[NSString stringWithFormat:@"[game-update] outofdate card check: %@", detail]];
+        if (result == RMGameUpdateCheckOffer) {
+            s.fatalErrorBody.text = @"The game moved to a new version. RuneMobile is downloading its new game files. "
+                                    @"Keep the app open.";
+            [s downloadGameUpdate:offer blocking:NO];
+            return;
+        }
+        [s refreshOutOfDateCard:result];
+    }];
+}
+
+- (void)refreshOutOfDateCard:(RMGameUpdateCheckResult)result {
+    RMGameUpdate *gu = [RMGameUpdate shared];
+    [self.outOfDateRecheckTimer invalidate];
+    self.outOfDateRecheckTimer = nil;
+    if (gu.readyForNextLaunch) {
+        self.fatalErrorBody.text = @"RuneMobile has downloaded the new game files. Close the app, then open it again "
+                                   @"from StikDebug to play.";
+        [self appendLine:@"[game-update] outofdate card: the new set is ready for the next launch"];
+        return;
+    }
+    if (result == RMGameUpdateCheckNoSet || result == RMGameUpdateCheckDisabled) {
+        self.fatalErrorBody.text = [ViewController fatalCopyForCode:@"error_game_js5connect_outofdate"][1];
+        return;
+    }
+    // Failed, or the newest set is the one that just ran out of date: wait for the next one to be published.
+    self.fatalErrorBody.text = @"The game moved to a new version. RuneMobile gets the new game files by itself, "
+                               @"usually within a few hours. Keep the app open and this card will say when they're "
+                               @"ready, or close it and try again later.";
+    __weak ViewController *weakSelf = self;
+    NSTimeInterval recheck = kOutOfDateRecheckSeconds;
+#if DEBUG
+    NSTimeInterval over = [[NSUserDefaults standardUserDefaults] doubleForKey:@"RMGameUpdateRecheckSeconds"];
+    if (over > 0)
+        recheck = over; // the simulator tests don't wait five minutes
+#endif
+    self.outOfDateRecheckTimer = [NSTimer scheduledTimerWithTimeInterval:recheck
+                                                                 repeats:NO
+                                                                   block:^(NSTimer *t) {
+                                                                       [weakSelf outOfDateCardCheck];
+                                                                   }];
+}
+
 - (void)onPlayTapped {
     // Only a served script check has the JVM's code cache ready; without it the JVM's brk #0x69 can kill the app.
     // The poller can be a tick behind, so ignore the tap; the next tick turns the button off and says why.
     if ([JVMLauncher jitScriptCheck] != RMJitScriptCheckServed)
         return;
+    // A game-update check (up to kCoverUpdatePlayWait) or a required download holds the tap, which then replays.
+    if ([self coverUpdateHoldsPlay]) {
+        if (!self.coverPlayQueued)
+            [self appendLine:@"[game-update] Play tapped: waiting for the game-update check or download"];
+        self.coverPlayQueued = YES;
+        return;
+    }
     // If the login web view ran this session, WebKit is resident and the JVM can't start cleanly — onLaunch
     // will prompt a restart instead. Keep the cover up in that case so the user lands back here post-restart.
     // Tap to Play boots the renderer the user SELECTED in the plugins panel, saved in NSUserDefaults
@@ -4332,7 +4544,12 @@ static void *perfProbePump(void *unused) {
                                                                    : [UIColor systemYellowColor];
         // #1: drive the Tap-to-Play cover. The big play button is on only while a launch can work; reflect the gate
         // in its status.
-        if (ready) {
+        NSString *updateText = [self coverUpdateStatusText];
+        if (ready && updateText) {
+            self.playStatusLabel.text = updateText;
+            self.playStatusLabel.textColor = self.coverUpdatePhase == RMCoverUpdateFailed ? [UIColor systemOrangeColor]
+                                                                                          : [UIColor systemYellowColor];
+        } else if (ready) {
             self.playStatusLabel.text = @"Ready to play";
             self.playStatusLabel.textColor = [UIColor systemGreenColor];
         } else if (checking) {
@@ -5815,7 +6032,8 @@ static const CFTimeInterval kKeepAwakeGrace = 10.0;
 }
 
 // FATAL-1: per-code copy. The engine's js5 tokens are distinct: js5connect_outofdate = the server refused this
-// client's revision (a weekly game update; only a rebuilt app fixes it); js5connect = four failed connection
+// client's revision (a game update; a game-update set or a rebuilt app fixes it, and startOutOfDateCardUpdate
+// replaces this copy while it follows the first); js5connect = four failed connection
 // attempts with no answer (servers down for maintenance, offline, or a blocked network; a rebuild does nothing);
 // js5connect_full = the server said it was full or busy; js5io = the stream broke; crash = engine died.
 + (NSArray<NSString *> *)fatalCopyForCode:(NSString *)code {
@@ -5903,6 +6121,20 @@ static const CFTimeInterval kKeepAwakeGrace = 10.0;
         return;
     NSString *snap = [JVMLauncher chromeSnapshot];
     NSDictionary *d = parseBridgeJSON(snap, "ViewController.updateFatalErrorOverlay");
+#if DEBUG
+    // Debug only: a fatal card on demand for the simulator tests of game updates. Write an engine code (such as
+    // error_game_js5connect_outofdate) into Documents/rm-fake-fatal; it is read once and removed.
+    if (![d isKindOfClass:[NSDictionary class]] || ![d[@"fatalError"] boolValue]) {
+        NSString *fakePath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject
+            stringByAppendingPathComponent:@"rm-fake-fatal"];
+        NSString *fake = [[NSString stringWithContentsOfFile:fakePath encoding:NSUTF8StringEncoding error:nil]
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (fake.length) {
+            [[NSFileManager defaultManager] removeItemAtPath:fakePath error:nil];
+            d = @{@"fatalError" : @YES, @"fatalCode" : fake};
+        }
+    }
+#endif
     if (![d isKindOfClass:[NSDictionary class]] || ![d[@"fatalError"] boolValue])
         return;
     NSString *code = [d[@"fatalCode"] isKindOfClass:[NSString class]] ? d[@"fatalCode"] : @"unknown";
@@ -5913,6 +6145,12 @@ static const CFTimeInterval kKeepAwakeGrace = 10.0;
     self.fatalErrorScrim.hidden = NO;
     [self.view bringSubviewToFront:self.fatalErrorScrim];
     [self appendLine:[NSString stringWithFormat:@"[shell] fatal: engine-fatal card shown (code=%@)", code]];
+    // Any js5 error means the jars loaded and the engine reached the network, so the booted set works; an outage
+    // must never count against it. outofdate: the game moved on, so the card follows a game update instead.
+    if ([code hasPrefix:@"error_game_js5"])
+        [[RMGameUpdate shared] settleBoot];
+    if ([code isEqualToString:@"error_game_js5connect_outofdate"])
+        [self startOutOfDateCardUpdate];
 }
 
 // PARITY-P0-6: show the reused FATAL-1 card for a pre-boot JVM failure, PUSHED directly (unlike
@@ -7856,6 +8094,7 @@ static CGRect mapRectFromArr(NSArray *a) {
         [self updateSessionExpiredOverlay]; // UX-LOGIN-01: same cadence/ungating as the reconnect scrim
         [self updateLoginScreenControls];
         [self updateFatalErrorOverlay];     // FATAL-1: latch-once fatal card, same cadence
+        [self updateGameUpdateSettle];      // game updates: the booted set reached its first frame
         [self updateHoppingOverlay];        // PARITY-P0-3: world-hop scrim, same cadence/ungating
         [self stampFirstInWorld];           // Phase 4 cold start: once, then a no-op
     }

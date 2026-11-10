@@ -3,7 +3,8 @@
      declared HERE rather than in src/main so it ships only in debug builds — the release app exposes no exported
      test surface (PROD-SECURITY-04). The manifest merger folds this intent-filter onto the main MainActivity. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application>
+    <!-- networkSecurityConfig: plain HTTP to loopback only, for the local game-update test server. -->
+    <application android:networkSecurityConfig="@xml/debug_network_security">
         <activity android:name=".MainActivity">
             <!-- Firebase Test Lab Game Loop: launches the app uninterrupted (no Robo crawl/relaunch), so the long
                  117HD boot -> login-screen -> startUp -> Zone shader compile gets its ~minute on real Mali. -->

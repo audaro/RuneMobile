@@ -1,4 +1,5 @@
 #import "RMDiagnostics.h"
+#import "RMGameUpdate.h"
 #import "JVMLauncher.h"
 #import "RMHeat.h"
 #import "RMMemoryTrail.h"
@@ -163,6 +164,7 @@ static const NSUInteger kRecentSessions = 8;
     [h appendFormat:@"Renderer  %@ (chosen)\n",
                     [[NSUserDefaults standardUserDefaults] stringForKey:@"rendererPref"] ?: @"cpu"];
     [h appendFormat:@"JIT       %@\n", [self jitText]];
+    [h appendFormat:@"Game upd  %@\n", [RMGameUpdate shared].statusLine];
     return h;
 }
 

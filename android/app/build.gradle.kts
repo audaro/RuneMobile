@@ -37,6 +37,28 @@ val hasReleaseKey: Boolean =
         )
     }
 
+// The commit a release build came from, for game updates (GameUpdate.kt): a set is published for one exact commit.
+// "<sha>-dirty" for a tree with modified tracked files and "unknown" outside a checkout, so neither ever matches a
+// published set. Debug builds stamp "debug" (their tests override it with a marker file instead).
+val sourceCommit: String by lazy {
+    fun git(vararg args: String): String? =
+        runCatching {
+            providers
+                .exec {
+                    commandLine("git", *args)
+                    isIgnoreExitValue = true
+                }.standardOutput.asText
+                .get()
+                .trim()
+        }.getOrNull()
+    val sha = git("rev-parse", "HEAD")?.takeIf { Regex("[0-9a-f]{40}").matches(it) }
+    when {
+        sha == null -> "unknown"
+        !git("status", "--porcelain", "--untracked-files=no").isNullOrEmpty() -> "$sha-dirty"
+        else -> sha
+    }
+}
+
 android {
     namespace = "dev.audaro.runemobile"
     compileSdk = 35
@@ -115,6 +137,7 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
+            buildConfigField("String", "SOURCE_COMMIT", "\"debug\"")
         }
         release {
             // R8/minify stays OFF on purpose: the embedded RuneLite engine + our headless bridges are resolved
@@ -123,6 +146,7 @@ android {
             // APK size is dominated by the unshrinkable native JRE + jars anyway, so R8 would save little.
             isMinifyEnabled = false
             isShrinkResources = false
+            buildConfigField("String", "SOURCE_COMMIT", "\"$sourceCommit\"")
             // PROD-RELEASE-ENG-02: sign with the dedicated release key when keystore.properties supplies one
             // (stable signature for sideload updates); otherwise fall back to the AOSP debug key so a keyless
             // clone/CI still produces an installable APK. NOTE: switching keys breaks update-in-place for anyone

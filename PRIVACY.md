@@ -13,8 +13,9 @@
   choose to sign in**, to the **RuneLite project** (to sync your config and hub plugins).
 - **The client also makes a few standard, non-opt-in network fetches that carry no account data** —
   to **Jagex** (the game-launcher config) and to **RuneLite's CDN/API** (a runtime config blob and
-  the world list). Like any web request these reveal your device's IP to those hosts, but send no
-  personal payload. They are itemised in the table below.
+  the world list), and to **GitHub** (the game-update check, and new game files after a game update).
+  Like any web request these reveal your device's IP to those hosts, but send no personal payload.
+  They are itemised in the table below.
 - **No telemetry or crash reports are sent.** This build boots the embedded client with
   `--disable-telemetry`, so RuneLite's usual boot telemetry and JVM-crash reporting to
   `api.runelite.net` are **off**.
@@ -52,6 +53,7 @@
 | World list | The OSRS world list for the world hopper / map | RuneLite API (`api.runelite.net`) | When the world switcher loads | Download only; no payload sent |
 | Item prices | The GE price table plugins use to value items | RuneLite API (`api.runelite.net/…/prices.js`) | At boot and on login | Download only; no payload sent |
 | Hub plugin downloads | Third-party plugin code you choose to install | RuneLite plugin repo (`repo.runelite.net`) | When you install a hub plugin | You choose what to install |
+| Game update check | A small signed file naming new game files for this build, and the files themselves (~40 MB) when the game has moved to a new version | GitHub (`github.com/audaro/runemobile` release downloads) | At launch (iOS: on the Play screen), and while the "game has updated" card is up | Download only; no payload sent. The app checks every file's signature and checksum before use |
 
 That is the complete list of outbound connections. **No telemetry, analytics, or crash reports
 are among them, and nothing carries your account data except the first table — where every
@@ -95,6 +97,7 @@ All paths are in the app's **private** storage unless marked *external* (adb-rea
 | App log and VM crash reports | iOS `hello-shell.log` (up to 8 MB per launch); `hs_err_pid*.log`, the newest three (app-private) | **On-device only.** Read by Share logs |
 | Share logs file | iOS `tmp/share-logs/`, Android `cache/share-logs/` (app-private) | Made only when you tap Share logs, and replaced by the next one. Leaves the phone only where you send it |
 | Embedded JVM + client jars (~500 MB) | `jvm/` | Unpacked from the app on first run |
+| Game update files (~40 MB) | Android `game-update/`; iOS `Library/Application Support/game-update/` (excluded from backup) | The newest verified game files for this build, downloaded after a game update. Replaced by the next one |
 
 ### Debug-only (stripped from release builds)
 
@@ -117,6 +120,8 @@ These exist solely to make development convenient and are **removed from any rel
   this build). Separately, its CDN/API serves all clients a runtime-config blob, the world list, and the
   item-price table at boot, and hub-plugin downloads you choose to install — these are downloads that
   send no account data (they reveal your IP, as any HTTP request does). Governed by RuneLite's terms.
+- **GitHub** — serves the game-update file check and, after a game update, the new game files. Downloads
+  only; no account data is sent (it reveals your IP, as any HTTP request does). Governed by GitHub's terms.
 - **No one else.**
 
 ## Notes & risk

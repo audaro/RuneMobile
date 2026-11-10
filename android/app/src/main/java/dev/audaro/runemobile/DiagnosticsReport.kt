@@ -120,6 +120,7 @@ object DiagnosticsReport {
                 ),
             )
             append("Renderer  $renderer\n")
+            append("Game upd  ${GameUpdate.statusLine}\n")
         }
     }
 
