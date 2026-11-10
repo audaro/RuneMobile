@@ -15,7 +15,7 @@
 > - **Account-ban risk.** Logging into live Old School RuneScape with an unapproved client can get
 >   your account **banned**. Use a **throwaway** account you can afford to lose — never a main.
 > - **Personal/technical project.** Provided as-is, best-effort, single-maintainer, **no warranty**.
->   It may break after any OSRS weekly update until a new build is published.
+>   It may stop working after an OSRS game update until new game files or a new build are published.
 > - **You install it yourself** by sideloading. It is not on the App Store or Google Play and never
 >   will be.
 > - **Your data:** the app sends your account/gameplay data only to **Jagex** (to play) and, *only
@@ -99,8 +99,12 @@ makes the real version visible on both sides.
 
 The URL resolves to the newest **stable** release (`/releases/latest/` skips prereleases), so the
 rolling per-merge builds are never offered as an update. Android has no equivalent feed — **check the
-releases page manually**, especially after an OSRS weekly update (a stale client shows a black screen /
-`js5connect_outofdate` until rebuilt against the new revision).
+releases page manually**.
+
+**Game updates** need neither (0.10.0 and later): when OSRS moves to a new revision, both apps download a
+signed set of new game jars made for their exact build from the `game-update` release and start on it.
+Builds older than 0.10.0 still stop at "Old School RuneScape has updated" (`js5connect_outofdate`) until a
+newer release is installed. Publishing a set: [docs/dev/upstream-release.md](docs/dev/upstream-release.md).
 
 ---
 

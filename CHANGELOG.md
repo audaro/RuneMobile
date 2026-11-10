@@ -14,6 +14,18 @@ as "What's new".
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-09
+
+### Added
+- **A game update no longer needs a new install.** When Old School RuneScape moves to a new version, the app
+  downloads the new game files for itself (about 40 MB) as soon as they are published, and starts on them. On
+  iPhone it checks on the start screen, and a needed update downloads there before the game starts. Android checks
+  in the background. If the "Old School RuneScape has updated" card is already up, it follows the download: Android
+  restarts by itself, and on iPhone the card says when to close the app and open it again from StikDebug. The files
+  are signed and checked before every start, and if new files ever fail to start twice, the app goes back to the
+  ones it came with. This is the last install a game update needs; changes to the app itself still come as new
+  releases.
+
 ### Changed
 - **117 HD keeps the resolution you set when the phone gets hot.** It used to drop to 65% by itself and hold there
   until the phone cooled, so a higher setting looked like it didn't save. Lowering it is now your choice: Game
@@ -26,6 +38,9 @@ as "What's new".
   what filled it.
 
 ### Fixed
+- **"Can't reach the game servers" no longer says the game has updated.** That card shows when the game servers
+  don't answer (an outage, or a network that blocks them), and it told you to install a new build, which does
+  nothing for an outage. It now says to try again in a few minutes, and a real game update gets its own card.
 - **iOS: dragging a finger scrolls the bank, skill guides and other lists.** A drag inside a window that scrolls (the
   bank, a skill guide, the emotes or quest list, settings, the collection log) turned the camera instead, so only
   the scroll bar's arrows moved it. A drag that starts over the game world still turns the camera. Android already
@@ -492,7 +507,8 @@ OAuth + RuneLite-account sync, native HUD/chat/tab-grid veneers, plugin panel.
 - Release signing: a dedicated key via `keystore.properties` when present, else
   the debug key (see `keystore.properties.example`).
 
-[Unreleased]: https://github.com/audaro/runemobile/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/audaro/runemobile/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/audaro/runemobile/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/audaro/runemobile/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/audaro/runemobile/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/audaro/runemobile/compare/v0.6.0...v0.7.1

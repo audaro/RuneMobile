@@ -1,7 +1,8 @@
 # Upstream merges and releases
 
-Rune Mobile is a fork of RuneLite, and it stops working on live OSRS soon after each weekly game update until
-upstream RuneLite is merged and a new build ships. This page covers that merge from start to push, the checks
+Rune Mobile is a fork of RuneLite, and it stops working on live OSRS soon after each game update until upstream
+RuneLite is merged and new game files ship, either as a game-update set (0.10.0 and later, below) or in a new
+build. This page covers that merge from start to push, the checks
 that prove it worked, and how builds become releases: the rolling prerelease every push to `master` produces, and
 the tagged stable releases the AltStore feed follows.
 
@@ -39,6 +40,30 @@ do.
   never merges and holds no token, on purpose: an automatic merge feeding a build that decodes the release signing
   key would let a single unreviewed upstream commit reach that key. The merge is a reviewed manual step.
 - **Otherwise, regularly.** Small merges are easier to review and to bisect than one large one.
+
+## Shipping a revision without a release
+
+From 0.10.0 on, both apps take a signed set of new game jars made for their exact build (iOS
+`RMGameUpdate.m`, Android `GameUpdate.kt`), so a revision bump that needs no native change ships without a
+release. A set is keyed by the full commit the release was built from, which the apps stamp at build time and
+the stable release's tag names.
+
+1. In a worktree at the latest stable release (`git worktree add ../rm-update v0.10.0`), merge upstream, stage
+   both ports and run the gates exactly as in the steps below.
+2. Build and sign the manifest (the signing key stays on the maintainer's Mac):
+   `tools/game-update/make-manifest.py --out DIR --revision N --required --base-url
+   https://github.com/audaro/runemobile/releases/download/game-update/ --ios-shell <release commit>
+   --android-shell <release commit>`. `N` must be above the live manifest's revision: a phone refuses
+   anything older than what it has seen. The jars come from the worktree's staged ones. If the merge moved the
+   Plugin Hub pin, add `--hub-pin <version>`: iOS sets the pin from native code, while Android reads it from the
+   client jar.
+3. `tools/game-update/publish.sh DIR` checks everything and says what it would change; `--apply` uploads the
+   jars, then the manifest, and reads the live copy back.
+
+Phones check at launch, and every five minutes while the "Old School RuneScape has updated" card is up. Each
+start re-checks the signature and every jar's hash, and a set that twice fails to reach its first frame is
+dropped for the jars the app shipped with. Test a set first against a debug build with
+`tools/game-update/serve-local.sh`.
 
 ## The merge, step by step
 

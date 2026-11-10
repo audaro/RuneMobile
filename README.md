@@ -186,8 +186,9 @@ the other as parity is closed.
 This is a **pre-release** (`0.x`). The [latest release](../../releases/latest) has the
 current version, and [`CHANGELOG.md`](CHANGELOG.md) says what each one changed. Every
 build tracks upstream RuneLite's development line and the game data current when it was
-built. It is playable, but it is a single-maintainer, best-effort build and may break
-after an OSRS weekly update until a new build is published.
+built. It is playable, but it is a single-maintainer, best-effort build and may stop
+working after an OSRS game update until new game files are published. From 0.10.0 on,
+the app downloads those by itself, so a game update needs no new install.
 
 ### Android
 
@@ -399,9 +400,13 @@ plugins.
 Updating **never wipes your data** — an in-place reinstall with the same signing
 identity keeps your token, cache, config, and renderer choice.
 
-- **There is no in-app update check.** Check the [Releases page](../../releases)
-  manually, especially after an OSRS weekly update — a stale client shows a black
-  screen / `js5connect_outofdate` until a build against the new revision is published.
+- **Game updates download by themselves (0.10.0 and later).** When OSRS moves to a new
+  version, the app fetches signed new game files made for its own build from this
+  repository's `game-update` release and starts on them, with nothing to install. iPhone
+  checks on the start screen, Android in the background. Older builds stop at "Old School
+  RuneScape has updated" until a newer release is installed.
+- **There is no in-app check for new app releases.** Check the [Releases page](../../releases)
+  now and then; changes to the app itself still ship as releases.
 - **Android update:** `adb install -r RuneMobile-<version>.apk` (or just open the
   newer APK). **Rollback:** `adb install -r -d RuneMobile-<older>.apk` (`-d` allows the
   version downgrade and keeps data).
@@ -459,7 +464,7 @@ did just before it went wrong.
 | Symptom | Cause / fix |
 |---|---|
 | "App not installed" | Enable "Install unknown apps" for your browser/file manager; ensure `arm64-v8a`. |
-| Black screen / `js5connect_outofdate` | OSRS updated; the build is stale — install a newer release. |
+| "Old School RuneScape has updated" / `js5connect_outofdate` | OSRS updated. 0.10.0 and later download the new game files once they are published: leave the app open (Android restarts by itself; on iPhone reopen it when the card says so). Older builds: install a newer release. |
 | Session drops when backgrounded | Expected; foreground the app to trigger the automatic re-login. |
 
 ---
@@ -616,7 +621,7 @@ A self-built mobile client is an **unapproved third-party client** on live OSRS
 - **Risks account bans** (temporary to permanent). **Use a throwaway account, never
   your main.**
 - Is **provided as-is**, best-effort, single-maintainer, **with no warranty**, and may
-  break after any OSRS update until a new build is published.
+  stop working after any OSRS update until new game files or a new build are published.
 - Is **sideload-only** — not on the App Store, Google Play, TestFlight, or F-Droid,
   and never will be. You install it yourself, on your own device, at your own risk.
 
