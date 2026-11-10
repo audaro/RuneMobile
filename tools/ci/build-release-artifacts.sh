@@ -178,7 +178,9 @@ if wants ios; then
 
 	# 2) Unlock the dedicated build keychain so codesign works from a non-interactive (service/tmux) session.
 	#    (The login keychain may be locked or out of the search list under a launchd runner.)
-	if [ -f "$CI_CONFIG_DIR/keychain.pw" ] && [ -f "$HOME/Library/Keychains/build.keychain-db" ]; then
+	#    Team-signed builds only: an ad-hoc build signs with no identity, and putting the build keychain in the
+	#    user's search list (which nothing restores) makes later codesign runs prompt for its password.
+	if [ "$IOS_ADHOC" != 1 ] && [ -f "$CI_CONFIG_DIR/keychain.pw" ] && [ -f "$HOME/Library/Keychains/build.keychain-db" ]; then
 		security unlock-keychain -p "$(cat "$CI_CONFIG_DIR/keychain.pw")" "$HOME/Library/Keychains/build.keychain-db"
 		security list-keychains -d user -s "$HOME/Library/Keychains/build.keychain-db" "$HOME/Library/Keychains/login.keychain-db" >/dev/null
 		log "build.keychain unlocked + in search list"
