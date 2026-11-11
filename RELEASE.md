@@ -43,10 +43,9 @@ These are accepted, documented behaviors — list the ones true for the build be
   117HD renderer steps its scene-resolution scale down under thermal pressure and restores it on
   cooldown only when Game settings > Lower resolution when hot is on (both ports, off by default); on
   a hot phone with it off, a notice offers to turn it on, at most once a launch.
-- **iOS can close a long session for using too much memory.** Seen twice on an iPhone 16 Pro on the GPU
-  renderer, after about 50 minutes each time; the cause isn't known yet. Reopen the app and attach
-  StikDebug as usual. A Share logs report made after it happens includes the memory readings that will
-  help find it.
+- **iOS, 117 HD: the picture can stop while the game and its sound carry on.** Reported once, on an iPhone 14
+  Pro Max after about 45 minutes; the cause isn't confirmed. Since 0.10.1 the app restarts the picture by itself
+  when frames stop reaching the screen. If it still freezes, reopen the app and send a Share logs report.
 - **JIT attach (iOS only).** iOS requires re-attaching the debugger (StikDebug) per launch to enable
   JIT; this is an OS constraint, not a bug.
 - **The CPU renderer slows as the phone heats up.** It draws the whole game in software, so its frame

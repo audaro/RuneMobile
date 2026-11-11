@@ -14,6 +14,21 @@ as "What's new".
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-11-11
+
+### Fixed
+- **iOS: long sessions no longer end with the app closed for memory.** On some iPhones the app's memory grew by
+  about 60 MB a minute from the moment it opened, on every renderer, until iOS closed it after 30 to 55 minutes.
+  The Java runtime's own sound library started the system's audio hardware layer inside the app, and a Bluetooth
+  audio component that came with it retried a connection iOS refuses, thousands of times a second, for the whole
+  session. The game's sound never used that library, so the app now ships without it, as Android always has. On
+  the iPhone that showed it, memory now stays level. A phone that was affected should also run cooler.
+- iOS, 117 HD: if the picture stops while the game and its sound carry on (reported on an iPhone 14 Pro Max after
+  about 45 minutes), the app now notices that frames have stopped reaching the screen and restarts the picture by
+  itself. The cause of that stall isn't confirmed yet, so this may not cover every case: if the picture still
+  freezes, reopen the app and send a Share logs report straight away, which now says how many frames were shown
+  and dropped.
+
 ## [0.10.0] - 2026-11-09
 
 ### Added

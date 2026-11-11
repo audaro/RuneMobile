@@ -73,7 +73,7 @@ android {
         // in the root CHANGELOG.md.
         val verMajor = 0
         val verMinor = 10
-        val verPatch = 0
+        val verPatch = 1
         val semverCode = verMajor * 10000 + verMinor * 100 + verPatch
         // CI rolling builds (tools/ci/) pass -PversionCodeOverride=<monotonic> and -PversionNameSuffix=<-master.N+sha>
         // so every merge-built APK is a strictly-newer update than the last; a normal local/tagged build passes
