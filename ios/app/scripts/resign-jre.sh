@@ -22,6 +22,13 @@ if [ ! -d "$JRE_DIR" ]; then
     exit 0
 fi
 
+# The app ships without the JRE's Java Sound library, as the Android one does. Game audio has its own output
+# (HeadlessMixerProvider), and libjsound's device listing starts the CoreAudio HAL inside the app. That loads the
+# system's Bluetooth audio plug-in, whose service the app sandbox refuses, and on the phones seen it then retries the
+# connection thousands of times a second for the whole session, leaking about 60 MB a minute until iOS ends the app.
+# Without the library the JDK's own sound providers fail to load and Java Sound skips them.
+rm -f "$JRE_DIR/lib/libjsound.dylib"
+
 # Simulator builds: the jre's Mach-O are iOS-device binaries, which the simulator's dyld refuses. The code is the
 # same arm64, so retag each one's LC_BUILD_VERSION as iossim and ad-hoc sign it (the rewrite drops the signature).
 # Files Xcode did not re-copy since the last build are already retagged and are left alone.
