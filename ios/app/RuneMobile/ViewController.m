@@ -695,6 +695,7 @@ static const NSTimeInterval kOutOfDateRecheckSeconds = 300.0; // the outofdate c
 @property (nonatomic, assign) int heatFpsLimit;         // the frame-rate limit the game last accepted, 0 for none
 @property (nonatomic, assign) long heatEngineFrames;    // the engine's frame counter at the last reading
 @property (nonatomic, assign) long heatPresentedFrames; // the direct present's, likewise
+@property (nonatomic, assign) long pipPresentRestarts;  // RouteCBridge pipPresentRecoveries at the last heat tick
 @property (nonatomic, assign) long long heatGameCpuNanos; // the game thread's CPU, likewise
 @property (nonatomic, assign) long heatGpuWaitNanos;      // its time waiting for the GPU, likewise
 @property (nonatomic, assign) double heatAppCpuSeconds;   // the whole app's CPU, likewise
@@ -6260,6 +6261,13 @@ static int simHeatLowPower = -1;
     // bumps the engine's, and before the world loads it is the engine that draws.
     long seq = MAX(self.heatEngineFrames, (long)[JVMLauncher renderedFrameSeq]); // -1 when the bridge can't say
     long presents = [RouteCBridge presentedFrameCount];
+    // A stalled 117HD picture restarts itself; the line is how a later report knows it happened.
+    long restarts = [RouteCBridge pipPresentRecoveries];
+    if (restarts != self.pipPresentRestarts) {
+        self.pipPresentRestarts = restarts;
+        [self appendLine:[NSString stringWithFormat:@"[present] 117HD's picture stalled and was restarted: %@",
+                                                    [RouteCBridge pipPresentReport] ?: @"(no count)"]];
+    }
     long frames = MAX(seq - self.heatEngineFrames, presents - self.heatPresentedFrames);
     self.heatEngineFrames = seq;
     self.heatPresentedFrames = presents;

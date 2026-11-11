@@ -5,6 +5,7 @@
 #import "RMMemoryTrail.h"
 #import "RMRedact.h"
 #import "RMResidency.h"
+#import "RouteCBridge.h"
 #import <sys/utsname.h>
 
 // How much of each log goes in. The whole report stays near 1 MB, well under a Discord attachment.
@@ -163,6 +164,9 @@ static const NSUInteger kRecentSessions = 8;
                     (t >= 0 && t < 4) ? thermal[t] : @"?", pi.systemUptime / 60.0];
     [h appendFormat:@"Renderer  %@ (chosen)\n",
                     [[NSUserDefaults standardUserDefaults] stringForKey:@"rendererPref"] ?: @"cpu"];
+    NSString *present = [RouteCBridge pipPresentReport];
+    if (present)
+        [h appendFormat:@"Picture   %@\n", present];
     [h appendFormat:@"JIT       %@\n", [self jitText]];
     [h appendFormat:@"Game upd  %@\n", [RMGameUpdate shared].statusLine];
     return h;

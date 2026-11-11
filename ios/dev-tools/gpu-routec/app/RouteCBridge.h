@@ -54,6 +54,11 @@
 // so hasPresentedFrame gates the reveal exactly like the CAEAGLLayer path. `id` = AVSampleBufferDisplayLayer.
 + (void)setPipPresentLayer:(id)sampleBufferDisplayLayer;
 + (void)setPipPresentEnabled:(BOOL)on;
+// The PiP present's own count of frames shown and dropped, for a report; nil before it has handled a frame. The
+// frame counts above include a frame it dropped, so a frozen picture can sit behind a healthy frame rate.
++ (NSString *)pipPresentReport;
+// How many times a long run of dropped frames made the PiP present start over (renderer flushed, buffers rebuilt).
++ (long)pipPresentRecoveries;
 // The canvas rows the PiP present keeps: only the top `rows` rows are blitted, so the hidden strip below them
 // (HudVeneerBridge.setHudStrip) never reaches the screen. 0 = the whole FBO. Main thread, before the GPU launch.
 + (void)setPipShownRows:(int)rows;

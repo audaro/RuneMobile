@@ -94,6 +94,15 @@ static void *sPresentLayer = NULL;
 // the CPU-frame blit to direct-present LAZILY — only once the GPU plugin has presented a real frame — so a parked/
 // slow startup (or the boot/login phase before the plugin runs) still shows the CPU frames instead of black.
 static _Atomic long sPresentedFrames = 0; // GL thread bumps it; the main thread reads it (reveal gate, perf chip)
+// The PiP present's own account. sPresentedFrames counts a frame whether or not it reached the video layer, so a
+// present that keeps dropping frames still reads as a healthy frame rate; these say what really happened.
+enum { kPipDropPool,
+       kPipDropTexture,
+       kPipDropSample,
+       kPipDropCauses };
+static _Atomic long sPipEnqueued = 0, sPipRecoveries = 0, sPipFailedFlushes = 0;
+static _Atomic long sPipDrops[kPipDropCauses];
+static _Atomic long sPipDropRun = 0, sPipLongestDropRun = 0; // frames dropped in a row: now, and at worst
 
 #if defined(RC_BACKEND_ANGLE)
 // ================================================================================================================
@@ -333,7 +342,41 @@ static CMVideoFormatDescriptionRef sPipFmt = NULL;
 // layer's own queue calls). State-transparent to the plugin: framebuffer bindings and the scissor switch (which
 // clips glBlitFramebuffer!) are saved + restored. Fenced so the formatter keeps this file's tab style.
 // clang-format off
+// A frame that could not reach the video layer. One or two in a row is the pipeline being briefly behind. A long
+// run means it will not clear by itself (every pool buffer held and never handed back, say), and the picture
+// stays frozen while the game and its sound carry on. So start over: the renderer lets go of what it holds, and
+// the pool and texture cache are rebuilt on the next frame. Tried again every kPipDropRunRetry frames while the
+// run lasts.
+enum { kPipDropRunLimit = 45, kPipDropRunRetry = 240 };
+static void rcPipDropped(int cause)
+{
+	sPipDrops[cause]++;
+	long run = ++sPipDropRun;
+	if (run > sPipLongestDropRun) sPipLongestDropRun = run;
+	if (run != kPipDropRunLimit && (run < kPipDropRunLimit || (run - kPipDropRunLimit) % kPipDropRunRetry != 0))
+	{
+		return;
+	}
+	sPipRecoveries++;
+	[sPipLayer.sampleBufferRenderer flush];
+	if (sPipTexCache) { CVOpenGLESTextureCacheFlush(sPipTexCache, 0); CFRelease(sPipTexCache); sPipTexCache = NULL; }
+	if (sPipPool) { CVPixelBufferPoolRelease(sPipPool); sPipPool = NULL; }
+	if (sPipFmt)  { CFRelease(sPipFmt); sPipFmt = NULL; }
+	sPipPoolW = sPipPoolH = 0;
+}
+
+static void rcPipPresentFrame(void);
+
+// The JVM's render thread has no autorelease pool of its own, so each frame gets one.
 static void rcPipPresent(void)
+{
+	@autoreleasepool
+	{
+		rcPipPresentFrame();
+	}
+}
+
+static void rcPipPresentFrame(void)
 {
 	if (!sPipEnqueueOn || !sCtx || !sFbo || sFboW <= 0 || sFboH <= 0)
 	{
@@ -346,6 +389,7 @@ static void rcPipPresent(void)
 		if (CVOpenGLESTextureCacheCreate(kCFAllocatorDefault, NULL, sCtx, NULL, &sPipTexCache) != kCVReturnSuccess)
 		{
 			sPipTexCache = NULL;
+			rcPipDropped(kPipDropTexture);
 			return;
 		}
 	}
@@ -363,6 +407,7 @@ static void rcPipPresent(void)
 		if (CVPixelBufferPoolCreate(kCFAllocatorDefault, NULL, (__bridge CFDictionaryRef) attrs, &sPipPool) != kCVReturnSuccess)
 		{
 			sPipPool = NULL;
+			rcPipDropped(kPipDropPool);
 			return;
 		}
 		sPipPoolW = sFboW; sPipPoolH = rows;
@@ -375,6 +420,7 @@ static void rcPipPresent(void)
 	if (CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, sPipPool,
 			(__bridge CFDictionaryRef) aux, &pb) != kCVReturnSuccess || !pb)
 	{
+		rcPipDropped(kPipDropPool);
 		return;
 	}
 	CVOpenGLESTextureRef tex = NULL;
@@ -382,6 +428,7 @@ static void rcPipPresent(void)
 			GL_TEXTURE_2D, GL_RGBA, sFboW, rows, GL_BGRA_EXT, GL_UNSIGNED_BYTE, 0, &tex) != kCVReturnSuccess || !tex)
 	{
 		CVPixelBufferRelease(pb);
+		rcPipDropped(kPipDropTexture);
 		return;
 	}
 
@@ -415,11 +462,13 @@ static void rcPipPresent(void)
 		if (sPipFmt) { CFRelease(sPipFmt); sPipFmt = NULL; }
 		CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, pb, &sPipFmt);
 	}
+	BOOL enqueued = NO;
 	if (sPipFmt)
 	{
 		AVSampleBufferVideoRenderer *renderer = sPipLayer.sampleBufferRenderer;
 		if (renderer.status == AVQueuedSampleBufferRenderingStatusFailed)
 		{
+			sPipFailedFlushes++;
 			[renderer flush];
 		}
 		CMSampleTimingInfo timing = { .duration = kCMTimeInvalid,
@@ -436,11 +485,21 @@ static void rcPipPresent(void)
 			}
 			[renderer enqueueSampleBuffer:sb];
 			CFRelease(sb);
+			enqueued = YES;
 		}
 	}
 	CFRelease(tex);
 	CVPixelBufferRelease(pb);
 	CVOpenGLESTextureCacheFlush(sPipTexCache, 0);
+	if (enqueued)
+	{
+		sPipEnqueued++;
+		sPipDropRun = 0;
+	}
+	else
+	{
+		rcPipDropped(kPipDropSample);
+	}
 }
 // clang-format on
 
@@ -582,6 +641,22 @@ static volatile BOOL sPresentLayerResized = NO;
 // YES once the GPU plugin has presented at least one frame to the screen. The UI uses this to switch from the
 // CPU-frame blit to direct present LAZILY, so boot/login (and a parked startup) show CPU frames, not black.
 + (BOOL)hasPresentedFrame { return sPresentedFrames > 0; }
+
++ (long)pipPresentRecoveries {
+    return sPipRecoveries;
+}
+
++ (NSString *)pipPresentReport {
+    long drops = sPipDrops[kPipDropPool] + sPipDrops[kPipDropTexture] + sPipDrops[kPipDropSample];
+    if (sPipEnqueued == 0 && drops == 0) {
+        return nil;
+    }
+    return [NSString stringWithFormat:@"%ld frames shown, %ld dropped (no free buffer %ld, texture %ld, sample %ld), "
+                                      @"longest run of drops %ld, now %ld, restarted %ld time(s), flushed after a failure %ld time(s)",
+                                      (long)sPipEnqueued, drops, (long)sPipDrops[kPipDropPool], (long)sPipDrops[kPipDropTexture],
+                                      (long)sPipDrops[kPipDropSample], (long)sPipLongestDropRun, (long)sPipDropRun, (long)sPipRecoveries,
+                                      (long)sPipFailedFlushes];
+}
 
 // Frames handed to the screen since the GPU context came up (reset by awtDestroy). The perf readout's fps on the
 // direct-present path, which never bumps the engine's frame sequence.

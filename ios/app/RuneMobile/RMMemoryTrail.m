@@ -121,6 +121,7 @@ static NSString *ZonesLine(void) {
 //   pools   autorelease pool pages by the thread that owns them, every minute. A page holds about 500 autoreleased
 //           objects, so a thread that autoreleases and never pops a pool grows a chain of them.
 //   strings Swift's string objects, every minute: how many, and the commonest texts among a sample of them.
+//   stack   where the thread with the most pool pages is, in a dozen samples, every minute
 static const vm_size_t kBucketTop[] = {256, 1024, 4096, 16384, 65536, 262144, 1048576, (vm_size_t)-1};
 static const char *const kBucketName[] = {"<=256", "<=1K", "<=4K", "<=16K", "<=64K", "<=256K", "<=1M", ">1M"};
 enum { kBuckets = sizeof kBucketTop / sizeof kBucketTop[0],
@@ -335,6 +336,114 @@ static NSString *PoolsLine(Census *c) {
     return line;
 }
 
+// The stack of the thread holding the most pool pages, sampled a few times: a pools line can only give an unnamed
+// thread's id, and the frames say whose thread it is even while it sleeps. Nothing but Mach calls run while the
+// thread is stopped, because it may hold malloc's lock; the names are looked up after it runs again.
+enum { kStackFrames = 28,
+       kStackSamples = 12,
+       kStackMinPages = 64,
+       kStackShown = 3 };
+
+typedef struct {
+    uintptr_t pc[kStackFrames];
+    unsigned frames, seen;
+} StackSample;
+
+static unsigned CaptureStack(thread_t th, uintptr_t *pc) {
+    unsigned n = 0;
+    if (thread_suspend(th) != KERN_SUCCESS)
+        return 0;
+    arm_thread_state64_t st;
+    mach_msg_type_number_t count = ARM_THREAD_STATE64_COUNT;
+    if (thread_get_state(th, ARM_THREAD_STATE64, (thread_state_t)&st, &count) == KERN_SUCCESS) {
+        const uintptr_t kAddressBits = 0x0000007FFFFFFFFFul; // drops a pointer signature, if there is one
+        pc[n++] = (uintptr_t)arm_thread_state64_get_pc(st) & kAddressBits;
+        uintptr_t fp = (uintptr_t)arm_thread_state64_get_fp(st);
+        while (n < kStackFrames && fp) {
+            uintptr_t frame[2];
+            vm_size_t got = 0;
+            if (vm_read_overwrite(mach_task_self(), fp, sizeof frame, (vm_address_t)frame, &got) != KERN_SUCCESS ||
+                got != sizeof frame)
+                break;
+            if (frame[1])
+                pc[n++] = frame[1] & kAddressBits;
+            if (frame[0] <= fp)
+                break;
+            fp = frame[0];
+        }
+    }
+    thread_resume(th);
+    return n;
+}
+
+// "libobjc.A.dylib objc_autorelease+132 (0x1fea4)": the nearest exported symbol, which inside a system framework can
+// be a neighbour of the real function, so the offset into the image is there to look it up properly.
+static NSString *FrameName(uintptr_t pc) {
+    Dl_info info;
+    if (!dladdr((void *)pc, &info) || !info.dli_fname)
+        return [NSString stringWithFormat:@"0x%lx", (unsigned long)pc];
+    const char *slash = strrchr(info.dli_fname, '/');
+    const char *image = slash ? slash + 1 : info.dli_fname;
+    unsigned long inImage = (unsigned long)(pc - (uintptr_t)info.dli_fbase);
+    if (!info.dli_sname)
+        return [NSString stringWithFormat:@"%s (0x%lx)", image, inImage];
+    return [NSString stringWithFormat:@"%s %s+%lu (0x%lx)", image, info.dli_sname,
+                                      (unsigned long)(pc - (uintptr_t)info.dli_saddr), inImage];
+}
+
+static NSArray<NSString *> *StackLines(Census *c) {
+    PoolThread *top = NULL;
+    for (unsigned i = 0; i < c->poolThreads; i++)
+        if (!top || c->pools[i].pages > top->pages)
+            top = &c->pools[i];
+    pthread_t pt = top ? (pthread_t)top->thread : NULL;
+    uint64_t tid = 0;
+    if (!pt || top->pages < kStackMinPages || pt == pthread_self() || pthread_threadid_np(pt, &tid) != 0)
+        return @[];
+    thread_t th = pthread_mach_thread_np(pt);
+    if (!th)
+        return @[];
+    static StackSample stacks[kStackSamples]; // only the trail's own thread comes here
+    unsigned distinct = 0, taken = 0;
+    for (unsigned s = 0; s < kStackSamples; s++) {
+        uintptr_t pc[kStackFrames];
+        unsigned n = CaptureStack(th, pc);
+        if (n) {
+            taken++;
+            unsigned k = 0;
+            while (k < distinct && (stacks[k].frames != n || memcmp(stacks[k].pc, pc, n * sizeof *pc) != 0))
+                k++;
+            if (k == distinct) {
+                memcpy(stacks[k].pc, pc, n * sizeof *pc);
+                stacks[k].frames = n;
+                stacks[k].seen = 0;
+                distinct++;
+            }
+            stacks[k].seen++;
+        }
+        usleep(7000);
+    }
+    if (!taken)
+        return @[ [NSString stringWithFormat:@"   stack tid %llu: could not be read", tid] ];
+    NSMutableArray<NSString *> *lines = [NSMutableArray array];
+    BOOL picked[kStackSamples] = {NO};
+    for (unsigned shown = 0; shown < kStackShown; shown++) {
+        int best = -1;
+        for (unsigned k = 0; k < distinct; k++)
+            if (!picked[k] && (best < 0 || stacks[k].seen > stacks[best].seen))
+                best = (int)k;
+        if (best < 0)
+            break;
+        picked[best] = YES;
+        NSMutableArray<NSString *> *names = [NSMutableArray array];
+        for (unsigned f = 0; f < stacks[best].frames; f++)
+            [names addObject:FrameName(stacks[best].pc[f])];
+        [lines addObject:[NSString stringWithFormat:@"   stack tid %llu x%u of %u: %@", tid, stacks[best].seen, taken,
+                                                    [names componentsJoinedByString:@" < "]]];
+    }
+    return lines;
+}
+
 static int CompareSamples(const void *a, const void *b) {
     const StringSample *x = a, *y = b;
     if (x->length != y->length)
@@ -437,6 +546,7 @@ static NSArray<NSString *> *CensusLines(uint64_t minute) {
                         worst / NSEC_PER_MSEC];
     lastStrings = c.strings;
     NSMutableArray<NSString *> *lines = [NSMutableArray arrayWithObjects:sizes, PoolsLine(&c), StringsLine(&c), nil];
+    [lines addObjectsFromArray:StackLines(&c)];
     if (c.classes) {
         NSMutableString *objc = [NSMutableString stringWithString:@"   objc"];
         size_t picked[kTopClasses];
