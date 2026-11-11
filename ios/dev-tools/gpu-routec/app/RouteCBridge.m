@@ -103,6 +103,9 @@ enum { kPipDropPool,
 static _Atomic long sPipEnqueued = 0, sPipRecoveries = 0, sPipFailedFlushes = 0;
 static _Atomic long sPipDrops[kPipDropCauses];
 static _Atomic long sPipDropRun = 0, sPipLongestDropRun = 0; // frames dropped in a row: now, and at worst
+// Frames in a row the renderer said it wasn't ready for more, now and at worst: handing it a frame proves nothing
+// about the screen, and a renderer that has stopped taking frames in is the nearest sign of that it gives.
+static _Atomic long sPipBusyRun = 0, sPipLongestBusyRun = 0;
 
 #if defined(RC_BACKEND_ANGLE)
 // ================================================================================================================
@@ -466,10 +469,26 @@ static void rcPipPresentFrame(void)
 	if (sPipFmt)
 	{
 		AVSampleBufferVideoRenderer *renderer = sPipLayer.sampleBufferRenderer;
-		if (renderer.status == AVQueuedSampleBufferRenderingStatusFailed)
+		if (renderer.status == AVQueuedSampleBufferRenderingStatusFailed || renderer.requiresFlushToResumeDecoding)
 		{
 			sPipFailedFlushes++;
 			[renderer flush];
+		}
+		// Each frame is stamped display-immediately, so a working renderer is ready again by the next one. The
+		// frame is still handed over; a long run only makes the renderer start afresh.
+		if (renderer.isReadyForMoreMediaData)
+		{
+			sPipBusyRun = 0;
+		}
+		else
+		{
+			long busy = ++sPipBusyRun;
+			if (busy > sPipLongestBusyRun) sPipLongestBusyRun = busy;
+			if (busy >= kPipDropRunLimit && (busy - kPipDropRunLimit) % kPipDropRunRetry == 0)
+			{
+				sPipRecoveries++;
+				[renderer flush];
+			}
 		}
 		CMSampleTimingInfo timing = { .duration = kCMTimeInvalid,
 			.presentationTimeStamp = CMClockGetTime(CMClockGetHostTimeClock()),
@@ -651,11 +670,13 @@ static volatile BOOL sPresentLayerResized = NO;
     if (sPipEnqueued == 0 && drops == 0) {
         return nil;
     }
-    return [NSString stringWithFormat:@"%ld frames shown, %ld dropped (no free buffer %ld, texture %ld, sample %ld), "
-                                      @"longest run of drops %ld, now %ld, restarted %ld time(s), flushed after a failure %ld time(s)",
-                                      (long)sPipEnqueued, drops, (long)sPipDrops[kPipDropPool], (long)sPipDrops[kPipDropTexture],
-                                      (long)sPipDrops[kPipDropSample], (long)sPipLongestDropRun, (long)sPipDropRun, (long)sPipRecoveries,
-                                      (long)sPipFailedFlushes];
+    return [NSString
+        stringWithFormat:@"%ld frames handed to the video layer, %ld dropped before it (no free buffer %ld, texture %ld, "
+                         @"sample %ld), longest run of drops %ld, now %ld; renderer not ready for at most %ld frames in "
+                         @"a row, now %ld; restarted %ld time(s), flushed after a failure %ld time(s)",
+                         (long)sPipEnqueued, drops, (long)sPipDrops[kPipDropPool], (long)sPipDrops[kPipDropTexture],
+                         (long)sPipDrops[kPipDropSample], (long)sPipLongestDropRun, (long)sPipDropRun,
+                         (long)sPipLongestBusyRun, (long)sPipBusyRun, (long)sPipRecoveries, (long)sPipFailedFlushes];
 }
 
 // Frames handed to the screen since the GPU context came up (reset by awtDestroy). The perf readout's fps on the
