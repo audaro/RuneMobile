@@ -222,8 +222,11 @@ public class EventBus
 			{
 				subscriber.invoke(event);
 			}
-			catch (Exception e)
+			catch (Exception | LinkageError e)
 			{
+				// LinkageError too: a Plugin Hub plugin is built for the RuneLite release the hub is pinned to, and
+				// the API here can be newer, so calling a member that has since changed throws NoSuchMethodError.
+				// Passed on, it stops the game loop for good: a login stuck at "Connecting to server...".
 				exceptionHandler.accept(e);
 			}
 		}

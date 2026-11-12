@@ -49,6 +49,20 @@ public interface AmbientSoundEffect
 	RandomSound getRandomSound();
 
 	/**
+	 * The background sound effect ids, from {@link #getRandomSound()}. Plugin Hub plugins built for
+	 * RuneLite 1.13.6 still call this.
+	 * @deprecated use {@link #getRandomSound()}
+	 * @return
+	 */
+	@Deprecated
+	@Nullable
+	default int[] getBackgroundSoundEffectIds()
+	{
+		final RandomSound sound = getRandomSound();
+		return sound == null ? null : sound.getSoundEffectIds();
+	}
+
+	/**
 	 * The plane the sound effect is on
 	 * @return
 	 */
