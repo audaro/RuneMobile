@@ -46,6 +46,11 @@ These are accepted, documented behaviors — list the ones true for the build be
 - **iOS, 117 HD: the picture can stop while the game and its sound carry on.** Reported once, on an iPhone 14
   Pro Max after about 45 minutes; the cause isn't confirmed. Since 0.10.1 the app restarts the picture by itself
   when frames stop reaching the screen. If it still freezes, reopen the app and send a Share logs report.
+- **Closing the app from the app switcher can skip plugins' save on close.** On Android, and on iOS once the
+  app has been suspended in the background, the system ends the app without notice, so a plugin that saves
+  only when RuneLite closes loses what it held since its last save. Every other way the app closes runs that
+  save first (since 0.10.2), and Flipping Utilities' auto-save is turned on for this reason. With other such
+  plugins, log out in-game before closing the app.
 - **JIT attach (iOS only).** iOS requires re-attaching the debugger (StikDebug) per launch to enable
   JIT; this is an OS constraint, not a bug.
 - **The CPU renderer slows as the phone heats up.** It draws the whole game in software, so its frame

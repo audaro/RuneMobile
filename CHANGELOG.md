@@ -14,6 +14,33 @@ as "What's new".
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-11-16
+
+### Fixed
+- **Some Plugin Hub plugins no longer stop the login at "Connecting to server...".** Hub plugins are built for
+  the RuneLite version the Plugin Hub serves, and 0.10.0 brought a newer RuneLite that renamed a game-sound
+  method. A hub plugin that still called the old one, such as Visual Sounds with Ambient Sounds on or Sound IDer
+  logging ambient sounds, threw an error at every login that stopped the game. The old method is back for those
+  plugins, and a plugin that calls a method this build doesn't have now fails on its own instead of stopping the
+  game.
+- **Plugins save when the app closes itself, and when iOS closes it.** Desktop RuneLite tells every plugin it is
+  shutting down before it exits, and that is when several plugins save what they keep in memory, such as Flipping
+  Utilities' trades and the XP Tracker's session. The apps never sent that, so a restart for a renderer change,
+  logging out, signing in again or the error card's button lost it. Every one of those now sends it first and
+  saves your settings, waiting at most 3 seconds for a plugin that hangs. On iPhone it also runs when iOS closes
+  an app that is still running in the background.
+- **Flipping Utilities keeps your trades when the app is closed in the background.** The plugin writes trades to
+  disk only on an in-game logout, on shutdown, or on its own auto-save, which is off by default. A phone app
+  closed from the app switcher gets no chance to run, so every trade since the last logout was lost, and the
+  profit tracker stayed empty. The app now turns Enable auto-save on once, when it first sees the plugin
+  installed, so a session ending that way loses at most the last auto-save interval (10 minutes unless you change
+  it). If you turn auto-save off again, it stays off.
+
+### Changed
+- Includes RuneLite's latest changes (to 2026-11-10): item prices on Hardcore main worlds use that economy's own
+  prices, World Hopper's world-type filter has a Hardcore main option, and Hiscore lookups and chat commands
+  recognise the Hardcore main chat icon.
+
 ## [0.10.1] - 2026-11-11
 
 ### Fixed
