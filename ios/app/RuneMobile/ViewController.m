@@ -46,6 +46,11 @@ static NSString *const kNewInstallDefaultsKey = @"newInstallDefaults";
 static const int kNewInstallFpsCap = 30;
 static NSString *const kNewInstallDrawDistance = @"30";    // base GPU's, down from the plugin's 50
 static const unsigned long long kShellLogCap = 8ull << 20; // hello-shell.log bytes per launch (appendLine)
+// Longest an exit waits for plugins to save on ClientShutdown (saveBeforeExit; Android ExitSave.TIMEOUT_MS). The
+// usual cost is a few ms; a plugin that hangs costs this, then config is saved anyway. Desktop RuneLite waits up to
+// 10 s with a window up.
+static const int kExitSaveTimeoutMs = 3000;
+static const int kTerminateSaveTimeoutMs = 2500; // applicationWillTerminate gets about 5 s in all
 @interface ChatTabButton : UIButton
 @end
 @implementation ChatTabButton
@@ -3254,9 +3259,23 @@ static const int kCamPitchPxPerSec = 200;
     }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self onLogoutWithCompletion:^{
+            [self saveBeforeExit:@"logout" timeoutMs:kExitSaveTimeoutMs];
             exit(0);
         }];
     });
+}
+
+// Every exit(0) runs this first, and so does applicationWillTerminate. iOS closes an app without the desktop
+// window-close that posts ClientShutdown, which is where plugins save what they keep in memory (Flipping Utilities'
+// trades, the XP Tracker session): this posts it, waits for them, then saves config. Synchronous, because the
+// process ends right after; Java caps the wait at about timeoutMs whatever a plugin does. A no-op before launch.
+- (void)saveBeforeExit:(NSString *)why timeoutMs:(int)timeoutMs {
+    if (!self.launched || ![JVMLauncher bridgeReady])
+        return;
+    NSString *r = [JVMLauncher mobilePrepareExit:timeoutMs];
+    if (!r)
+        [JVMLauncher mobileFlushConfig]; // no prepareExit in this jar: at least queue the config save, as before
+    [self appendLine:[NSString stringWithFormat:@"[shell] %@: saved before exit -> %@", why, r ?: @"(queued flush)"]];
 }
 
 // LOGIN-1: switch to another already-signed-in character without a fresh web OAuth. tokens.json keeps the whole
@@ -3321,9 +3340,14 @@ static const int kCamPitchPxPerSec = 200;
                             @"Restart, then reopen RuneLite from your Home Screen — you won't have to log in "
                             @"again.", who]
                   preferredStyle:UIAlertControllerStyleAlert];
-    [a addAction:[UIAlertAction actionWithTitle:@"Restart now" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
-        exit(0);   // tokens.json is already written atomically; the relaunch reads it and goes straight to play
-    }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Restart now"
+                                          style:UIAlertActionStyleDefault
+                                        handler:^(UIAlertAction *x) {
+                                            [self saveBeforeExit:@"restart to play" timeoutMs:kExitSaveTimeoutMs];
+                                            // tokens.json is already written atomically; the relaunch reads it and
+                                            // goes straight to play
+                                            exit(0);
+                                        }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Not now" style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:a animated:YES completion:nil];
 }
@@ -3762,6 +3786,8 @@ static const int kCamPitchPxPerSec = 200;
     // The one ending we get told about. Everything else is a kill with no notice, which is what
     // the residency record exists to distinguish.
     [RMResidency noteCleanExit];
+    // iOS allows about 5 s here (a swipe-away while the keepalive holds the app awake lands here): stay well inside.
+    [self saveBeforeExit:@"will terminate" timeoutMs:kTerminateSaveTimeoutMs];
 }
 
 - (void)didReceiveMemoryWarning {
@@ -4127,7 +4153,7 @@ static NSString * const kRendererHdClass  = @"rs117.hd.HdPlugin";
                                           style:UIAlertActionStyleDestructive
                                         handler:^(UIAlertAction *act) {
                                             [ud synchronize];                // force the rendererPref to disk before the hard exit bypasses teardown
-                                            [JVMLauncher mobileFlushConfig]; // persist any pending RuneLite config edits too
+                                            [self saveBeforeExit:@"renderer quit" timeoutMs:kExitSaveTimeoutMs];
                                             exit(0);
                                         }]];
     UIViewController *presenter = self.presentedViewController ?: self;
@@ -6188,6 +6214,7 @@ static const CFTimeInterval kKeepAwakeGrace = 10.0;
 }
 
 - (void)onFatalErrorClose {
+    [self saveBeforeExit:@"fatal close" timeoutMs:kExitSaveTimeoutMs]; // plugins and config can outlive the engine
     exit(0); // same as promptRestartToPlay's restart: the applet is dead; a fresh process is the only recovery
 }
 

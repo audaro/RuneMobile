@@ -2030,13 +2030,8 @@ class MainActivity : AppCompatActivity() {
             .Builder(this)
             .setTitle("Renderer: $label")
             .setMessage("Saved. The renderer is fixed at launch, so it applies on the next start. Restart now?")
-            .setPositiveButton("Restart") { _, _ ->
-                val i = packageManager.getLaunchIntentForPackage(packageName)
-                i?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                startActivity(i)
-                finishAffinity()
-                Runtime.getRuntime().exit(0)
-            }.setNegativeButton("Later", null)
+            .setPositiveButton("Restart") { _, _ -> relaunchApp("renderer restart") }
+            .setNegativeButton("Later", null)
             .show()
     }
 
@@ -2175,9 +2170,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** A clean relaunch of the process (the embedded VM is one-per-process). */
-    private fun relaunchApp() {
-        val i = packageManager.getLaunchIntentForPackage(packageName)
+    /** A clean relaunch of the process (the embedded VM is one-per-process), once plugins and config have saved. */
+    private fun relaunchApp(why: String = "relaunch") {
+        ExitSave.exitAfterSave(why) { relaunchNow(packageManager.getLaunchIntentForPackage(packageName)) }
+    }
+
+    /** Start [i] in a fresh task and end this process. Reach it only through [ExitSave.exitAfterSave]. */
+    private fun relaunchNow(i: Intent?) {
         i?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         startActivity(i)
         finishAffinity()
@@ -2284,10 +2283,7 @@ class MainActivity : AppCompatActivity() {
     private fun restartIntoGpu() {
         val i = packageManager.getLaunchIntentForPackage(packageName)
         i?.putExtra("routecgpu", true)
-        i?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-        startActivity(i)
-        finishAffinity()
-        Runtime.getRuntime().exit(0)
+        ExitSave.exitAfterSave("restart into GPU") { relaunchNow(i) }
     }
 
     /** Dev "HD" button: restart the process into 117HD (routecrlhd) mode — same clean-boot mechanism as
@@ -2299,10 +2295,7 @@ class MainActivity : AppCompatActivity() {
         runCatching { File(getExternalFilesDir(null), "rlhd.once").writeText("1") }
         val i = packageManager.getLaunchIntentForPackage(packageName)
         i?.putExtra("routecrlhd", true)
-        i?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-        startActivity(i)
-        finishAffinity()
-        Runtime.getRuntime().exit(0)
+        ExitSave.exitAfterSave("restart into 117 HD") { relaunchNow(i) }
     }
 
     /** Log out is destructive (drops the Jagex session + kills the process) — confirm before doing it. */
@@ -2328,11 +2321,7 @@ class MainActivity : AppCompatActivity() {
             CookieManager.getInstance().removeAllCookies {
                 CookieManager.getInstance().flush()
                 Log.i(TAG, "logout: tokens deleted + cookies purged — restarting into the login gate")
-                val i = packageManager.getLaunchIntentForPackage(packageName)
-                i?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                startActivity(i)
-                finishAffinity()
-                Runtime.getRuntime().exit(0)
+                relaunchApp("logout")
             }
         }
         if (booted.get()) {

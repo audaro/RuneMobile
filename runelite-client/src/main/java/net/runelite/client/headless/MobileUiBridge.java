@@ -428,6 +428,27 @@ public final class MobileUiBridge
 		return "{\"ok\":true}";
 	}
 
+	/**
+	 * The process is about to end: every native {@code exit(0)} path calls this first, and so does iOS
+	 * {@code applicationWillTerminate}. Posts {@code ClientShutdown} once, the event the desktop client posts when
+	 * its window closes and the one plugins save their in-memory data on, waits for its subscribers and the tasks
+	 * they hand to {@code waitFor}, then saves config. Blocks the CALLING thread for about {@code timeoutMs} at
+	 * most (capped at 10 s), whatever a plugin does: see {@link ExitSave}. Call it only when the exit is certain,
+	 * since subscribers stop work for good (the session ping, plugin timers).
+	 *
+	 * @return JSON {@code {"ok":true,"posted":..,"finished":..,"flushed":..,"fallback":..,"ms":..}}
+	 */
+	public static String prepareExit(int timeoutMs)
+	{
+		final ConfigManager cm = configManager;
+		final EventBus eb = eventBus;
+		if (!ENABLED || cm == null || eb == null)
+		{
+			return "{\"ok\":false,\"reason\":\"facade-off\"}";
+		}
+		return ExitSave.run(eb, cm, timeoutMs);
+	}
+
 	// ---- Plugin side-panels (NavigationButton/PluginPanel) ---------------------------------------------
 	// HeadlessClientUI.addNavigation/removeNavigation forward here (the desktop sidebar/toolbar doesn't exist
 	// headless). We keep the registered nav buttons so the native shell can show a toolbar and render the

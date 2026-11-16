@@ -276,6 +276,7 @@ METHOD MobileUiBridge#panelText(String) -> String
 METHOD MobileUiBridge#panelWheel(int,int,int) -> String
 METHOD MobileUiBridge#pluginDiag(String) -> String
 METHOD MobileUiBridge#pollMobileUiEvents(long) -> String
+METHOD MobileUiBridge#prepareExit(int) -> String
 METHOD MobileUiBridge#publishLink(String) -> void
 METHOD MobileUiBridge#publishNotification(String,String) -> void
 METHOD MobileUiBridge#publishNotification(String,String,String,int) -> void

@@ -97,6 +97,7 @@ static jmethodID gMuiSeq = NULL;        // getMobileUiSeq()J
 static jmethodID gMuiPoll = NULL;       // pollMobileUiEvents(J)Ljava/lang/String;
 static jmethodID gMuiProcessed = NULL;  // getProcessedWriteId()J
 static jmethodID gMuiFlush = NULL;      // flushConfigQueued()Ljava/lang/String; (async, off the iOS main thread)
+static jmethodID gMuiPrepareExit = NULL;  // prepareExit(I)Ljava/lang/String; (optional; blocks, bounded)
 static jmethodID gMuiHubManifest = NULL;  // hubManifest()Ljava/lang/String;
 static jmethodID gMuiHubInstall = NULL;   // hubInstall(Ljava/lang/String;)Ljava/lang/String;
 static jmethodID gMuiHubUninstall = NULL; // hubUninstall(Ljava/lang/String;)Ljava/lang/String;
@@ -724,6 +725,11 @@ static BOOL ensureMui(void) {
     if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); gMuiNotesGet = NULL; }
     gMuiNotesSet = (*env)->GetStaticMethodID(env, global, "notesSet", "(Ljava/lang/String;)Ljava/lang/String;");
     if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); gMuiNotesSet = NULL; }
+    gMuiPrepareExit = (*env)->GetStaticMethodID(env, global, "prepareExit", "(I)Ljava/lang/String;");
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        gMuiPrepareExit = NULL;
+    }
     gMuiGeAvail = (*env)->GetStaticMethodID(env, global, "geAvailable", "()Z");
     if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); gMuiGeAvail = NULL; }
     gMuiGeSetUi = (*env)->GetStaticMethodID(env, global, "geSetUiOpen", "(Z)Ljava/lang/String;");
@@ -4261,6 +4267,22 @@ static NSString *noteConfigWrite(NSString *ack) {
     NSData *d = [out dataUsingEncoding:NSUTF8StringEncoding];
     NSDictionary *r = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:NULL] : nil;
     return [r isKindOfClass:[NSDictionary class]] && [r[@"ok"] boolValue] ? [r[@"writeId"] longLongValue] : 0;
+}
+
+// The process is about to end (an exit(0) or applicationWillTerminate). Synchronous on purpose, unlike
+// mobileFlushConfig: Java posts ClientShutdown so plugins save what they hold in memory, then saves config, and
+// returns within about timeoutMs whatever a plugin does (MobileUiBridge.prepareExit / ExitSave). nil when the
+// facade or the method isn't there.
++ (NSString *)mobilePrepareExit:(int)timeoutMs {
+    if (!ensureMui() || !gMuiPrepareExit)
+        return nil;
+    JNIEnv *env = gMainEnv;
+    jstring js = (jstring)(*env)->CallStaticObjectMethod(env, gMuiClass, gMuiPrepareExit, (jint)timeoutMs);
+    if ((*env)->ExceptionCheck(env)) {
+        bridgeNoteClear(env, "JVMLauncher.mobilePrepareExit");
+        return nil;
+    }
+    return js ? jstringToNS(env, js) : nil;
 }
 
 + (NSString *)mobileHubManifest {

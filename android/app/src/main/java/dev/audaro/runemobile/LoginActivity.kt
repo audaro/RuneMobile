@@ -341,13 +341,16 @@ class LoginActivity : AppCompatActivity() {
     /** Relaunch the app in a fresh task + kill this process, so JNI_CreateJavaVM re-snapshots JX_* from the
      *  newly-written tokens.json (Review-2: login-first or a clean process restart). */
     private fun restartIntoCleanBoot() {
-        val intent = packageManager.getLaunchIntentForPackage(packageName)
-        if (intent != null) {
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-            startActivity(intent)
+        // A re-login from a running game (session expired) shares the game's process: let its plugins save first.
+        ExitSave.exitAfterSave("login restart") {
+            val intent = packageManager.getLaunchIntentForPackage(packageName)
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                startActivity(intent)
+            }
+            finishAffinity()
+            Runtime.getRuntime().exit(0) // even if the relaunch intent was null, a manual relaunch re-snapshots JX_*
         }
-        finishAffinity()
-        Runtime.getRuntime().exit(0) // even if the relaunch intent was null, a manual relaunch re-snapshots JX_*
     }
 
     private fun cancelAndExit() {

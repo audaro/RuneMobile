@@ -118,6 +118,7 @@ static jmethodID g_midBoundKeybinds = nullptr, g_midFireHotkey = nullptr;
 // Native Game settings: frame-rate cap + idle logout, riding on the FPS Control / Logout Timer plugins (optional).
 static jmethodID g_midGameSettings = nullptr, g_midSetFpsCap = nullptr, g_midSetIdleLogout = nullptr;
 static jmethodID g_midFlushConfig = nullptr;   // A8: persist pending config writes when the app backgrounds
+static jmethodID g_midPrepareExit = nullptr;   // ClientShutdown + config save before every exit(0) (optional)
 static jmethodID g_midResetPluginConfig = nullptr;     // SC-2/CFG-10: whole-group reset to defaults
 static jmethodID g_midResetConfig = nullptr;           // P2-4: single-key reset to default
 static jmethodID g_midNotificationDefaults = nullptr;  // SC-1/NOTIF-2: default Notification seed JSON
@@ -835,6 +836,7 @@ static bool publishBridge(JNIEnv *env) {
             g_midSetConfig        = midOpt(env, mug, "setConfig", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
             g_midProcessedWriteId = midOpt(env, mug, "getProcessedWriteId", "()J");
             g_midFlushConfig      = midOpt(env, mug, "flushConfig", "()Ljava/lang/String;");   // A8 background flush
+            g_midPrepareExit = midOpt(env, mug, "prepareExit", "(I)Ljava/lang/String;");
             g_midResetPluginConfig   = midOpt(env, mug, "resetPluginConfig", "(Ljava/lang/String;)Ljava/lang/String;");   // SC-2 reset
             g_midResetConfig = midOpt(env, mug, "resetConfig", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"); // P2-4 single-key reset
             g_midNotificationDefaults = midOpt(env, mug, "notificationDefaults", "()Ljava/lang/String;");                  // SC-1 defaults
@@ -2413,6 +2415,14 @@ Java_dev_audaro_runemobile_JvmLauncher_nativeSetFpsCap(JNIEnv *artEnv, jobject, 
     if (!mobileUiReady() || !g_midSetFpsCap)
         return artEnv->NewStringUTF("");
     return mobileUiStrInt(artEnv, g_midSetFpsCap, fps);
+}
+// The process is about to end: Java posts ClientShutdown so plugins save what they keep in memory, then saves
+// config, returning within about timeoutMs whatever a plugin does. BLOCKS: call it off the UI thread (onBridge).
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_audaro_runemobile_JvmLauncher_nativePrepareExit(JNIEnv *artEnv, jobject, jint timeoutMs) {
+    if (!mobileUiReady() || !g_midPrepareExit)
+        return artEnv->NewStringUTF("");
+    return mobileUiStrInt(artEnv, g_midPrepareExit, timeoutMs);
 }
 // Set the idle logout time in minutes. Returns the bridge JSON ack.
 extern "C" JNIEXPORT jstring JNICALL

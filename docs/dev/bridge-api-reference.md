@@ -13,7 +13,7 @@ how the bridge works, which thread each call runs on, and how to change it safel
 
 | Classes | Methods | JSON keys | System properties |
 |---:|---:|---:|---:|
-| 23 | 254 | 283 | 84 |
+| 23 | 255 | 283 | 84 |
 
 ## Classes
 
@@ -31,7 +31,7 @@ how the bridge works, which thread each call runs on, and how to change it safel
 - [`LootTrackerBridge`](#loottrackerbridge): 6 methods, 14 JSON keys
 - [`MenuPeekBridge`](#menupeekbridge): 5 methods, 23 JSON keys, 2 properties
 - [`MobileChromeBridge`](#mobilechromebridge): 5 methods, 23 JSON keys, 1 property
-- [`MobileUiBridge`](#mobileuibridge): 65 methods, 15 JSON keys, 1 property
+- [`MobileUiBridge`](#mobileuibridge): 66 methods, 15 JSON keys, 1 property
 - [`OverlayBridge`](#overlaybridge): 9 methods, 11 JSON keys
 - [`QuestHelperBridge`](#questhelperbridge): 8 methods, 10 JSON keys
 - [`RLHDStarter`](#rlhdstarter): 2 methods, 1 JSON key, 4 properties
@@ -578,6 +578,8 @@ Phase-6 (W3): the second reverse-JNI facade — the *Java-owned* mobile-UI contr
   AG2 diagnostic: loaded-plugin count + any whose class name contains `needle`. For the routecgpu starter to log why the gpu plugin is/ isn't in the loaded set.
 - `pollMobileUiEvents(long sinceSeq)` → `String`  
   Events with `seq > sinceSeq`, as `{seq, events:[{seq,kind,group,key}]}`. The panel diffs: any `config` event for a group it shows → re-read that group; any `plugin` event → re-read the plugin list (a toggle can disable conflicting plugins). Returns the latest `seq` so the panel advances its cursor even when no event matched.
+- `prepareExit(int timeoutMs)` → `String`  
+  The process is about to end: every native `exit(0)` path calls this first, and so does iOS `applicationWillTerminate`. Posts `ClientShutdown` once, the event the desktop client posts when its window closes and the one plugins save their in-memory data on, waits for its subscribers and the tasks they hand to `waitFor`, then saves config. Blocks the CALLING thread for about `timeoutMs` at most (capped at 10 s), whatever a plugin does: see `ExitSave`. Call it only when the exit is certain, since subscribers stop work for good (the session ping, plugin timers).
 - `publishLink(String url)` → `void`  
   Outbound-link channel. `LinkBrowser#browse` forwards every URL here (Wiki, HiScore, plugin "open page" links, etc.) because the sandbox has no system browser. The native shell drains `nextLink()` each frame and opens it in-app (SFSafariViewController / Custom Tabs). Bounded; gated.
 - `publishNotification(String title, String body)` → `void`  

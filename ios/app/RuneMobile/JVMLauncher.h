@@ -588,6 +588,12 @@ typedef NS_ENUM(NSInteger, RMJitScriptCheck) {
 /// couldn't be queued): once +mobileProcessedWriteId reaches it, the file is written.
 + (long long)mobileFlushConfig;
 
+/// The process is about to end: post ClientShutdown (once) so plugins save what they keep in memory, the way the
+/// desktop client does when its window closes, then save config. BLOCKS the main thread for about timeoutMs at
+/// most, whatever a plugin does. Call it right before exit(0) and in applicationWillTerminate, never on a path
+/// that may carry on. Returns the bridge's JSON for the log, or nil when the facade isn't up.
++ (NSString *)mobilePrepareExit:(int)timeoutMs;
+
 /// Plugin-hub catalog JSON (MobileUiBridge.hubManifest). First call returns {"status":"loading"} while the
 /// signed manifest downloads on a background thread; poll until status is "ok" (plugins[]) or "error:*".
 + (nullable NSString *)mobileHubManifest;

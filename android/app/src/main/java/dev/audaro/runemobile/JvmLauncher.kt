@@ -314,6 +314,11 @@ object JvmLauncher {
     // A8: persist pending plugin-config writes (call when the app backgrounds). Off the UI thread (onBridge).
     external fun nativeFlushConfig(): String
 
+    // Before every exit(0): ClientShutdown (plugins save in-memory data) + a config save, bounded by timeoutMs.
+    // Blocks, so call it on the bridge thread; ExitSave.exitAfterSave does. "" when the facade or the method isn't
+    // there.
+    external fun nativePrepareExit(timeoutMs: Int): String
+
     // SC-2/CFG-10: reset an entire plugin/config group to defaults (returns {"ok":..,"writeId":n}). Off the UI thread.
     external fun nativeResetPluginConfig(group: String): String
 

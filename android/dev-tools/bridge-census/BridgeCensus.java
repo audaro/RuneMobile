@@ -68,6 +68,7 @@ public final class BridgeCensus
 		"MobileUiBridge#pollMobileUiEvents(long)",
 		"MobileUiBridge#getProcessedWriteId()",
 		"MobileUiBridge#flushConfig()",
+		"MobileUiBridge#prepareExit(int)",
 		"MobileUiBridge#registerNav(NavigationButton)",
 		"MobileUiBridge#unregisterNav(NavigationButton)",
 		"MobileUiBridge#listPanels()",
