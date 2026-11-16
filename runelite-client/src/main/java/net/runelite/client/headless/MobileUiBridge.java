@@ -307,6 +307,11 @@ public final class MobileUiBridge
 		TimeTrackingBridge.init(pm, ct);  // native Time Tracking reflow
 		OverlayBridge.init(pm, ct);       // native overlay edit-mode (reposition/snap/reset)
 		InfoBoxBridge.init(pm, ct);       // native infobox long-press menu
+		if (ENABLED && cm != null)
+		{
+			// Plugins are loaded but not started yet (RuneLite.start inits the UI before startPlugins).
+			HubPluginDefaults.onBoot(cm);
+		}
 		log.info("[mobileui] facade wired: plugins={} config={} clientThread={} eventBus={}",
 			pm != null, cm != null, ct != null, eb != null);
 	}
@@ -1305,6 +1310,7 @@ public final class MobileUiBridge
 		{
 			if (install)
 			{
+				HubPluginDefaults.beforeInstall(cm, internalName); // before the plugin's startUp reads it
 				epm.install(internalName);
 			}
 			else
