@@ -183,6 +183,47 @@ public class ExitSaveTest
 		verify(cm, times(2)).sendConfig();
 	}
 
+	/** A synced profile's save waits on the RuneLite account sync, an HTTP call with no overall timeout. */
+	@Test
+	public void aHungConfigSaveCostsTheGraceNotTheExit()
+	{
+		final CountDownLatch release = new CountDownLatch(1);
+		doAnswer(inv ->
+		{
+			release.await();
+			return null;
+		}).when(cm).sendConfig();
+
+		final long t0 = System.nanoTime();
+		final String r = ExitSave.run(new EventBus(), cm, 300);
+		final long ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0);
+		release.countDown();
+
+		assertTrue("returned in " + ms + " ms", ms < 300 + ExitSave.FLUSH_GRACE_MS + 700);
+		assertTrue(r, r.contains("\"fallback\":false") && r.contains("\"flushed\":false"));
+	}
+
+	@Test
+	public void aHungSubscriberAndAHungConfigSaveStillReturn()
+	{
+		final CountDownLatch release = new CountDownLatch(1);
+		doAnswer(inv ->
+		{
+			release.await();
+			return null;
+		}).when(cm).sendConfig();
+		final EventBus bus = new EventBus();
+		bus.register(new HungPlugin(release));
+
+		final long t0 = System.nanoTime();
+		final String r = ExitSave.run(bus, cm, 300);
+		final long ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0);
+		release.countDown();
+
+		assertTrue("returned in " + ms + " ms", ms < 300 + ExitSave.FLUSH_GRACE_MS + 700);
+		assertTrue(r, r.contains("\"fallback\":true") && r.contains("\"flushed\":false"));
+	}
+
 	@Test
 	public void aZeroWaitStillSavesConfig()
 	{

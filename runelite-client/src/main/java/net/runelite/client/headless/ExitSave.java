@@ -40,16 +40,19 @@ import net.runelite.client.events.ClientShutdown;
  * the XP Tracker's session, Loot Tracker's pending submission, and {@code ConfigManager} itself (priority -100, so
  * after the others). Neither port has that window, so before this every mobile exit dropped that data.
  *
- * <p>{@link #run} blocks its caller for about {@code timeoutMs} at most. The post runs on its own daemon thread,
- * so a subscriber that hangs costs the wait and never the exit; the caller then saves config itself. The event goes
- * out once per process: a second call (say, a logout path followed by another exit) only saves config again.
+ * <p>{@link #run} blocks its caller for {@code timeoutMs} plus {@link #FLUSH_GRACE_MS} at most. The post runs on
+ * its own daemon thread, so a subscriber that hangs costs the wait and never the exit; config is then saved from
+ * another daemon thread. Neither save runs on the caller's thread, because {@code sendConfig} can wait without limit:
+ * a synced profile with a RuneLite account sends its changes with {@code configClient.patch(..).get()} before it
+ * writes them to disk. The event goes out once per process: a second call (say, a logout path followed by another
+ * exit) only saves config again.
  */
 @Slf4j
 final class ExitSave implements Runnable
 {
 	/** The desktop client's own limit for {@code ClientShutdown} consumers. */
 	static final long MAX_WAIT_MS = 10_000;
-	/** Extra time for a config write that is already under way when the wait runs out. */
+	/** Extra time for the config save once the wait runs out, whichever thread is doing it. */
 	static final long FLUSH_GRACE_MS = 1_000;
 	private static final long RETRY_MS = 50;
 
@@ -100,11 +103,15 @@ final class ExitSave implements Runnable
 		{
 			if (save.flushClaimed.compareAndSet(false, true))
 			{
-				// Stuck in a subscriber or still waiting on a task one handed to waitFor: save config here. The worker
+				// Stuck in a subscriber or still waiting on a task one handed to waitFor: save config now. The worker
 				// won't save after this. (ConfigManager's own subscriber could, if a hung one ahead of it came free in
-				// this instant; one of the two saves would then fail on the lock, and the other still writes.)
+				// this instant; one of the two saves would then fail on the lock, and the other still writes.) Not on
+				// this thread: the caller can be the iOS main thread, and the save can wait on the network.
 				fallback = true;
-				save.flushed = flushOnce(cm);
+				final Thread f = new Thread(() -> save.flushed = flushOnce(cm), "RuneMobile Exit Save");
+				f.setDaemon(true);
+				f.start();
+				join(f, TimeUnit.MILLISECONDS.toNanos(FLUSH_GRACE_MS));
 			}
 			else
 			{

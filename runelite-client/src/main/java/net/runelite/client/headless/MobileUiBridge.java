@@ -437,8 +437,8 @@ public final class MobileUiBridge
 	 * The process is about to end: every native {@code exit(0)} path calls this first, and so does iOS
 	 * {@code applicationWillTerminate}. Posts {@code ClientShutdown} once, the event the desktop client posts when
 	 * its window closes and the one plugins save their in-memory data on, waits for its subscribers and the tasks
-	 * they hand to {@code waitFor}, then saves config. Blocks the CALLING thread for about {@code timeoutMs} at
-	 * most (capped at 10 s), whatever a plugin does: see {@link ExitSave}. Call it only when the exit is certain,
+	 * they hand to {@code waitFor}, then saves config. Blocks the CALLING thread for {@code timeoutMs} (capped at
+	 * 10 s) plus 1 s at most, whatever a plugin or the network does: see {@link ExitSave}. Call it only when the exit is certain,
 	 * since subscribers stop work for good (the session ping, plugin timers).
 	 *
 	 * @return JSON {@code {"ok":true,"posted":..,"finished":..,"flushed":..,"fallback":..,"ms":..}}
