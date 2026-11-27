@@ -72,5 +72,14 @@
 #   api.runelite.net/runelite-<v>/pluginhub (POST)   1.13.5 200 | 1.13.6 200 | 1.13.7-SNAPSHOT 200
 # Hub pin bumped 1.13.5 -> 1.13.6: the newest release this tree has merged, and it answers on both services.
 # api.base stays on ${project.version}; the -SNAPSHOT path the client requests answers 200.
-reviewed_project_version=1.13.7
-pinned_hub_version=1.13.6
+#
+# 2026-11-26 review at project 1.13.9-SNAPSHOT (after merging upstream through 9af7b54dea, rev 243, which carries
+# Release 1.13.7 and Release 1.13.8), probed with the client's exact URL shapes:
+#   repo.runelite.net/plugins/manifest/<v>_full.js   1.13.6 200 | 1.13.7 200 | 1.13.8 200 | 1.13.9 404 | 1.13.9-SNAPSHOT 404
+#   api.runelite.net/runelite-<v>/pluginhub (POST)   1.13.6 200 | 1.13.7 200 | 1.13.8 200 | 1.13.9-SNAPSHOT 200
+# Hub pin bumped 1.13.6 -> 1.13.8: the newest release this tree has merged, and it answers on both services.
+# Needed, not just allowed: 1.13.8 removed World.getIndex()/setIndex() and added a crop argument to
+# FontTypeFace.drawWidgetText, so an older hub build calling either would fail to link on this client.
+# api.base stays on ${project.version}; the -SNAPSHOT path the client requests answers 200.
+reviewed_project_version=1.13.9
+pinned_hub_version=1.13.8
