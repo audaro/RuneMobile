@@ -14,9 +14,14 @@ as "What's new".
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-11-27
+
 ### Changed
-- **Updated for the 25 November game update** (RuneLite 1.13.8, game revision 243). Plugin Hub plugins now come
-  from RuneLite 1.13.8's list.
+- **Updated for the 25 November game update** (RuneLite 1.13.8, game revision 243). 0.10.2 gets it as a game update
+  at its next launch, with no reinstall; this release builds it in for new installs and for anyone on 0.10.0 or
+  0.10.1. Plugin Hub plugins now come from RuneLite 1.13.8's list.
+- **Includes RuneLite's latest changes**, among them the Hunter plugin handling failed net-trap resets, the Marlin
+  cooking level in the skill calculator, and a fix for the colour of clan broadcast channel names.
 
 ## [0.10.2] - 2026-11-16
 
