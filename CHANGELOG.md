@@ -14,6 +14,10 @@ as "What's new".
 
 ## [Unreleased]
 
+### Changed
+- **Updated for the 25 November game update** (RuneLite 1.13.8, game revision 243). Plugin Hub plugins now come
+  from RuneLite 1.13.8's list.
+
 ## [0.10.2] - 2026-11-16
 
 ### Fixed
